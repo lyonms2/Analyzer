@@ -386,9 +386,9 @@ EMA_BARRIERS = {
     },
     
     'PUMP/USDT': {
-        'barreira_1': 8,
-        'barreira_2': 25,
-        'barreira_3': 80
+        'barreira_1': 15,
+        'barreira_2': 31,
+        'barreira_3': 92
     },
     
     'ENA/USDT': {
