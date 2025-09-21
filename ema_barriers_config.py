@@ -192,9 +192,9 @@ EMA_BARRIERS = {
     },
     
     'DYDX/USDT': {
-        'barreira_1': 15,
-        'barreira_2': 40,
-        'barreira_3': 150
+        'barreira_1': 21,
+        'barreira_2': 37,
+        'barreira_3': 95
     },
     
     'TIA/USDT': {
