@@ -1,4 +1,4 @@
-import streamlit as st
+def create_advanced_chart(data: pd.DataFrame, symbol: str) -> go.Figure:import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import ta
 from typing import Dict, Tuple, List
 import time
+import pytz
 from ema_barriers_config import EMA_BARRIERS, CRYPTO_LIST
 
 # Configuração da página
@@ -22,6 +23,7 @@ class KuCoinCryptoAnalyzer:
     def __init__(self):
         self.base_url = "https://api.kucoin.com"
         self.crypto_symbols = CRYPTO_LIST
+        self.brazil_tz = pytz.timezone('America/Sao_Paulo')
         
     def get_kucoin_data(self, symbol: str, timeframe: str = "1day", days: int = 200) -> pd.DataFrame:
         """Busca dados da KuCoin API"""
@@ -63,6 +65,8 @@ class KuCoinCryptoAnalyzer:
             
             # Processar dados
             df['timestamp'] = pd.to_datetime(df['timestamp'].astype(int), unit='s')
+            # Converter para fuso horário do Brasil
+            df['timestamp'] = df['timestamp'].dt.tz_localize('UTC').dt.tz_convert(self.brazil_tz)
             df.set_index('timestamp', inplace=True)
             df = df.sort_index()
             
@@ -257,8 +261,138 @@ class KuCoinCryptoAnalyzer:
             'long_signal': latest['Long_Signal'],
             'short_signal': latest['Short_Signal']
         }
+    
+    def scan_all_cryptos(self, timeframe: str = "1d", days: int = 100) -> Dict[str, List]:
+        """Escaneia todas as criptomoedas em busca de sinais de compra e venda"""
+        buy_signals = []
+        sell_signals = []
+        errors = []
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        total_cryptos = len(self.crypto_symbols)
+        
+        for i, symbol in enumerate(self.crypto_symbols):
+            try:
+                # Atualizar progresso
+                progress = (i + 1) / total_cryptos
+                progress_bar.progress(progress)
+                status_text.text(f"Analisando {symbol}... ({i+1}/{total_cryptos})")
+                
+                # Buscar e analisar dados
+                data = self.get_kucoin_data(symbol, timeframe, days)
+                
+                if not data.empty:
+                    # Aplicar indicadores
+                    data = self.calculate_ema_barriers(data, symbol)
+                    data = self.calculate_rsi_75(data)
+                    data = self.calculate_stochastic_rsi(data)
+                    data = self.apply_strategy(data)
+                    
+                    # Verificar sinais mais recentes
+                    analysis = self.get_latest_analysis(data)
+                    
+                    if analysis.get('long_signal', 0) == 1:
+                        buy_signals.append({
+                            'symbol': symbol,
+                            'price': analysis['price'],
+                            'rsi_75': analysis['rsi_75'],
+                            'stoch_k': analysis['stoch_k'],
+                            'breakthrough_b1': analysis['respect_b1'],
+                            'breakthrough_b2': analysis['respect_b2'],
+                            'breakthrough_b3': analysis['respect_b3'],
+                            'timestamp': data.index[-1].strftime('%d/%m/%Y %H:%M')
+                        })
+                    
+                    if analysis.get('short_signal', 0) == 1:
+                        sell_signals.append({
+                            'symbol': symbol,
+                            'price': analysis['price'],
+                            'rsi_75': analysis['rsi_75'],
+                            'stoch_k': analysis['stoch_k'],
+                            'breakthrough_b1': analysis['respect_b1'],
+                            'breakthrough_b2': analysis['respect_b2'],
+                            'breakthrough_b3': analysis['respect_b3'],
+                            'timestamp': data.index[-1].strftime('%d/%m/%Y %H:%M')
+                        })
+                
+            except Exception as e:
+                errors.append(f"{symbol}: {str(e)[:50]}")
+                continue
+        
+        # Limpar barra de progresso
+        progress_bar.empty()
+        status_text.empty()
+        
+        return {
+            'buy_signals': buy_signals,
+            'sell_signals': sell_signals,
+            'errors': errors
+        }
 
-def create_advanced_chart(data: pd.DataFrame, symbol: str) -> go.Figure:
+def display_signals_table(signals_data: Dict, signal_type: str):
+    """Exibe tabela com sinais encontrados"""
+    if signal_type == "buy":
+        signals = signals_data['buy_signals']
+        title = "🟢 OPORTUNIDADES DE COMPRA"
+        color = "green"
+    else:
+        signals = signals_data['sell_signals']
+        title = "🔴 OPORTUNIDADES DE VENDA"
+        color = "red"
+    
+    if not signals:
+        st.info(f"Nenhum sinal de {signal_type.upper()} encontrado no momento.")
+        return
+    
+    st.markdown(f"### {title} ({len(signals)} encontradas)")
+    
+    # Converter para DataFrame
+    df = pd.DataFrame(signals)
+    
+    # Formatação das colunas
+    df['price'] = df['price'].apply(lambda x: f"${x:.6f}")
+    df['rsi_75'] = df['rsi_75'].apply(lambda x: f"{x:.1f}")
+    df['stoch_k'] = df['stoch_k'].apply(lambda x: f"{x:.1f}")
+    
+    # Identificar qual barreira foi rompida
+    def get_breakthrough_info(row):
+        breakthroughs = []
+        if row['breakthrough_b1'] != 0:
+            direction = "↗️" if row['breakthrough_b1'] > 0 else "↘️"
+            breakthroughs.append(f"B1{direction}")
+        if row['breakthrough_b2'] != 0:
+            direction = "↗️" if row['breakthrough_b2'] > 0 else "↘️"
+            breakthroughs.append(f"B2{direction}")
+        if row['breakthrough_b3'] != 0:
+            direction = "↗️" if row['breakthrough_b3'] > 0 else "↘️"
+            breakthroughs.append(f"B3{direction}")
+        return " | ".join(breakthroughs) if breakthroughs else "N/A"
+    
+    df['barreiras'] = df.apply(get_breakthrough_info, axis=1)
+    
+    # Reorganizar colunas para exibição
+    display_df = df[['symbol', 'price', 'rsi_75', 'stoch_k', 'barreiras', 'timestamp']].copy()
+    display_df.columns = ['Moeda', 'Preço', 'RSI 75', 'Stoch K', 'Barreiras', 'Horário (BR)']
+    
+    # Exibir tabela
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    # Estatísticas
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total de Sinais", len(signals))
+    with col2:
+        avg_rsi = np.mean([s['rsi_75'] for s in signals])
+        st.metric("RSI Médio", f"{avg_rsi:.1f}")
+    with col3:
+        avg_stoch = np.mean([s['stoch_k'] for s in signals])
+        st.metric("Stoch K Médio", f"{avg_stoch:.1f}")
     """Cria gráfico avançado com barreiras EMA"""
     fig = make_subplots(
         rows=4, cols=1,
@@ -423,143 +557,254 @@ def create_advanced_chart(data: pd.DataFrame, symbol: str) -> go.Figure:
 
 def main():
     st.title("₿ Analisador de Criptomoedas - Estratégia de Barreiras EMA")
-    st.markdown("**Nova estratégia: Barreiras EMA + RSI 75 + Estocástico RSI com Respeito às Barreiras**")
+    st.markdown("**Nova estratégia: Barreiras EMA + RSI 75 + Estocástico RSI com Breakthrough das Barreiras**")
+    
+    # Mostrar horário atual do Brasil
+    brazil_tz = pytz.timezone('America/Sao_Paulo')
+    current_time = datetime.now(brazil_tz)
+    st.sidebar.markdown(f"🕐 **Horário BR:** {current_time.strftime('%d/%m/%Y %H:%M:%S')}")
     
     # Inicializar analisador
     analyzer = KuCoinCryptoAnalyzer()
     
-    # Sidebar
-    st.sidebar.header("⚙️ Configurações")
+    # Criar abas
+    tab1, tab2 = st.tabs(["📊 Análise Individual", "🔍 Scanner Geral"])
     
-    # Seleção da criptomoeda
-    selected_symbol = st.sidebar.selectbox(
-        "Escolha a Criptomoeda:",
-        options=analyzer.crypto_symbols,
-        index=0
-    )
+    with tab1:
+        # Sidebar para análise individual
+        st.sidebar.header("⚙️ Análise Individual")
+        
+        # Seleção da criptomoeda
+        selected_symbol = st.sidebar.selectbox(
+            "Escolha a Criptomoeda:",
+            options=analyzer.crypto_symbols,
+            index=0
+        )
+        
+        # Timeframe
+        timeframe = st.sidebar.selectbox(
+            "Timeframe:",
+            options=["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"],
+            index=6  # 1d como padrão
+        )
+        
+        # Número de dias
+        days = st.sidebar.number_input(
+            "Dias de Histórico:",
+            min_value=50,
+            max_value=1000,
+            value=200
+        )
+        
+        # Mostrar configuração das barreiras
+        st.sidebar.subheader("📊 Barreiras EMA Configuradas")
+        if selected_symbol in EMA_BARRIERS:
+            barriers = EMA_BARRIERS[selected_symbol]
+            st.sidebar.write(f"**{selected_symbol}**")
+            st.sidebar.write(f"• Barreira 1: {barriers['barreira_1']}")
+            st.sidebar.write(f"• Barreira 2: {barriers['barreira_2']}")
+            st.sidebar.write(f"• Barreira 3: {barriers['barreira_3']}")
+        else:
+            st.sidebar.write("Usando configurações padrão")
+        
+        # Botão de análise individual
+        if st.sidebar.button("🚀 Analisar", type="primary"):
+            with st.spinner(f"Buscando dados da KuCoin para {selected_symbol}..."):
+                # Buscar dados
+                data = analyzer.get_kucoin_data(selected_symbol, timeframe, days)
+                
+                if not data.empty:
+                    # Aplicar indicadores e estratégia
+                    data = analyzer.calculate_ema_barriers(data, selected_symbol)
+                    data = analyzer.calculate_rsi_75(data)
+                    data = analyzer.calculate_stochastic_rsi(data)  # Usando Stochastic RSI agora
+                    data = analyzer.apply_strategy(data)
+                    
+                    # Análise atual
+                    analysis = analyzer.get_latest_analysis(data)
+                    
+                    # Métricas principais
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric(
+                            "Preço Atual",
+                            f"${analysis['price']:.6f}",
+                            delta=f"{((analysis['price'] - data['Close'].iloc[-2]) / data['Close'].iloc[-2] * 100):.2f}%" if len(data) > 1 else "0%"
+                        )
+                    
+                    with col2:
+                        trend_color = "🟢" if analysis['trend'] == 'Bull' else "🔴"
+                        st.metric("Tendência", f"{trend_color} {analysis['trend']}")
+                    
+                    with col3:
+                        rsi_color = "🟢" if analysis['rsi_direction'] == 'Bull' else "🔴"
+                        st.metric("RSI 75", f"{rsi_color} {analysis['rsi_75']:.1f}")
+                    
+                    with col4:
+                        signal_text = {1: "🟢 LONG", -1: "🔴 SHORT", 0: "⚪ NEUTRO"}
+                        st.metric("Sinal", signal_text.get(analysis['final_signal'], "❓"))
+                    
+                    # Gráfico principal
+                    chart = create_advanced_chart(data, selected_symbol)
+                    st.plotly_chart(chart, use_container_width=True)
+                    
+                    # Análise detalhada
+                    st.subheader("📋 Análise Detalhada")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**Barreiras EMA:**")
+                        st.write(f"• Barreira 1: ${analysis['barreira_1']:.6f}")
+                        st.write(f"• Barreira 2: ${analysis['barreira_2']:.6f}")
+                        st.write(f"• Barreira 3: ${analysis['barreira_3']:.6f}")
+                        
+                        st.write("**Estocástico RSI:**")
+                        st.write(f"• %K: {analysis['stoch_k']:.1f}")
+                        st.write(f"• %D: {analysis['stoch_d']:.1f}")
+                        
+                        oversold_text = "🟢 Sobrevendido" if analysis['stoch_oversold'] else ""
+                        overbought_text = "🔴 Sobrecomprado" if analysis['stoch_overbought'] else ""
+                        st.write(f"• Status: {oversold_text}{overbought_text}")
+                    
+                    with col2:
+                        st.write("**Breakthrough das Barreiras:**")
+                        breakthrough_texts = []
+                        if analysis['respect_b1'] == 1:
+                            breakthrough_texts.append("• Barreira 1: ↗️ Rompeu de baixo")
+                        elif analysis['respect_b1'] == -1:
+                            breakthrough_texts.append("• Barreira 1: ↘️ Rompeu de cima")
+                        
+                        if analysis['respect_b2'] == 1:
+                            breakthrough_texts.append("• Barreira 2: ↗️ Rompeu de baixo")
+                        elif analysis['respect_b2'] == -1:
+                            breakthrough_texts.append("• Barreira 2: ↘️ Rompeu de cima")
+                            
+                        if analysis['respect_b3'] == 1:
+                            breakthrough_texts.append("• Barreira 3: ↗️ Rompeu de baixo")
+                        elif analysis['respect_b3'] == -1:
+                            breakthrough_texts.append("• Barreira 3: ↘️ Rompeu de cima")
+                        
+                        if breakthrough_texts:
+                            for text in breakthrough_texts:
+                                st.write(text)
+                        else:
+                            st.write("• Nenhuma barreira rompida recentemente")
+                        
+                        st.write("**Condições de Entrada:**")
+                        if analysis['long_signal']:
+                            st.write("✅ **LONG**: RSI > 50 + Breakthrough de baixo + StochRSI < 20")
+                        elif analysis['short_signal']:
+                            st.write("✅ **SHORT**: RSI < 50 + Breakthrough de cima + StochRSI > 80")
+                        else:
+                            st.write("❌ Condições não atendidas")
+                    
+                    # Resumo da estratégia
+                    st.subheader("📖 Estratégia de Barreiras EMA")
+                    st.info("""
+                    **Como Funciona:**
+                    
+                    🎯 **Barreiras EMA**: Cada ativo tem 3 barreiras personalizadas (rápida, média, lenta)
+                    
+                    📈 **Tendência**: Definida pela Barreira 3 - mudança só quando preço ultrapassa completamente
+                    
+                    🔢 **RSI 75 Períodos**: > 50 = Bull Market | < 50 = Bear Market
+                    
+                    ⚡ **Entrada**: Breakthrough da Barreira + StochRSI + RSI na mesma direção
+                    
+                    🟢 **LONG**: RSI > 50 + Preço rompeu barreira de baixo para cima + StochRSI < 20
+                    
+                    🔴 **SHORT**: RSI < 50 + Preço rompeu barreira de cima para baixo + StochRSI > 80
+                    """)
     
-    # Timeframe
-    timeframe = st.sidebar.selectbox(
-        "Timeframe:",
-        options=["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"],
-        index=6  # 1d como padrão
-    )
-    
-    # Número de dias
-    days = st.sidebar.number_input(
-        "Dias de Histórico:",
-        min_value=50,
-        max_value=1000,
-        value=200
-    )
-    
-    # Mostrar configuração das barreiras
-    st.sidebar.subheader("📊 Barreiras EMA Configuradas")
-    if selected_symbol in EMA_BARRIERS:
-        barriers = EMA_BARRIERS[selected_symbol]
-        st.sidebar.write(f"**{selected_symbol}**")
-        st.sidebar.write(f"• Barreira 1: {barriers['barreira_1']}")
-        st.sidebar.write(f"• Barreira 2: {barriers['barreira_2']}")
-        st.sidebar.write(f"• Barreira 3: {barriers['barreira_3']}")
-    else:
-        st.sidebar.write("Usando configurações padrão")
-    
-    # Botão de análise
-    if st.sidebar.button("🚀 Analisar", type="primary"):
-        with st.spinner(f"Buscando dados da KuCoin para {selected_symbol}..."):
-            # Buscar dados
-            data = analyzer.get_kucoin_data(selected_symbol, timeframe, days)
+    with tab2:
+        st.header("🔍 Scanner de Todas as Criptomoedas")
+        st.markdown("Escaneia todas as 65 criptomoedas em busca de sinais de compra e venda.")
+        
+        # Configurações do scanner
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            scanner_timeframe = st.selectbox(
+                "Timeframe para Scanner:",
+                options=["1m", "5m", "15m", "30m", "1h", "4h", "1d"],
+                index=6,
+                key="scanner_tf"
+            )
+        
+        with col2:
+            scanner_days = st.number_input(
+                "Dias de Histórico:",
+                min_value=50,
+                max_value=500,
+                value=100,
+                key="scanner_days"
+            )
+        
+        with col3:
+            st.write("") # Espaço
+            scan_button = st.button("🚀 Escanear Todas as Moedas", type="primary", key="scan_all")
+        
+        if scan_button:
+            st.markdown("---")
             
-            if not data.empty:
-                # Aplicar indicadores e estratégia
-                data = analyzer.calculate_ema_barriers(data, selected_symbol)
-                data = analyzer.calculate_rsi_75(data)
-                data = analyzer.calculate_stochastic_rsi(data)  # Usando Stochastic RSI agora
-                data = analyzer.apply_strategy(data)
+            with st.spinner("🔍 Escaneando todas as criptomoedas..."):
+                # Executar scanner
+                signals_data = analyzer.scan_all_cryptos(scanner_timeframe, scanner_days)
                 
-                # Análise atual
-                analysis = analyzer.get_latest_analysis(data)
-                
-                # Métricas principais
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.metric(
-                        "Preço Atual",
-                        f"${analysis['price']:.6f}",
-                        delta=f"{((analysis['price'] - data['Close'].iloc[-2]) / data['Close'].iloc[-2] * 100):.2f}%" if len(data) > 1 else "0%"
-                    )
-                
-                with col2:
-                    trend_color = "🟢" if analysis['trend'] == 'Bull' else "🔴"
-                    st.metric("Tendência", f"{trend_color} {analysis['trend']}")
-                
-                with col3:
-                    rsi_color = "🟢" if analysis['rsi_direction'] == 'Bull' else "🔴"
-                    st.metric("RSI 75", f"{rsi_color} {analysis['rsi_75']:.1f}")
-                
-                with col4:
-                    signal_text = {1: "🟢 LONG", -1: "🔴 SHORT", 0: "⚪ NEUTRO"}
-                    st.metric("Sinal", signal_text.get(analysis['final_signal'], "❓"))
-                
-                # Gráfico principal
-                chart = create_advanced_chart(data, selected_symbol)
-                st.plotly_chart(chart, use_container_width=True)
-                
-                # Análise detalhada
-                st.subheader("📋 Análise Detalhada")
-                
+                # Exibir resultados
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.write("**Barreiras EMA:**")
-                    st.write(f"• Barreira 1: ${analysis['barreira_1']:.6f}")
-                    st.write(f"• Barreira 2: ${analysis['barreira_2']:.6f}")
-                    st.write(f"• Barreira 3: ${analysis['barreira_3']:.6f}")
-                    
-                    st.write("**Estocástico RSI:**")
-                    st.write(f"• %K: {analysis['stoch_k']:.1f}")
-                    st.write(f"• %D: {analysis['stoch_d']:.1f}")
-                    
-                    oversold_text = "🔴 Sobrevendido" if analysis['stoch_oversold'] else ""
-                    overbought_text = "🟢 Sobrecomprado" if analysis['stoch_overbought'] else ""
-                    st.write(f"• Status: {oversold_text}{overbought_text}")
+                    display_signals_table(signals_data, "buy")
                 
                 with col2:
-                    st.write("**Breakthrough das Barreiras:**")
-                    breakthrough_texts = []
-                    if analysis['respect_b1'] == 1:
-                        breakthrough_texts.append("• Barreira 1: ↗️ Rompeu de baixo")
-                    elif analysis['respect_b1'] == -1:
-                        breakthrough_texts.append("• Barreira 1: ↘️ Rompeu de cima")
-                    
-                    if analysis['respect_b2'] == 1:
-                        breakthrough_texts.append("• Barreira 2: ↗️ Rompeu de baixo")
-                    elif analysis['respect_b2'] == -1:
-                        breakthrough_texts.append("• Barreira 2: ↘️ Rompeu de cima")
-                        
-                    if analysis['respect_b3'] == 1:
-                        breakthrough_texts.append("• Barreira 3: ↗️ Rompeu de baixo")
-                    elif analysis['respect_b3'] == -1:
-                        breakthrough_texts.append("• Barreira 3: ↘️ Rompeu de cima")
-                    
-                    if breakthrough_texts:
-                        for text in breakthrough_texts:
-                            st.write(text)
-                    else:
-                        st.write("• Nenhuma barreira rompida recentemente")
-                    
-                    st.write("**Condições de Entrada:**")
-                    if analysis['long_signal']:
-                        st.write("✅ **LONG**: RSI > 50 + Breakthrough de baixo + StochRSI < 20")
-                    elif analysis['short_signal']:
-                        st.write("✅ **SHORT**: RSI < 50 + Breakthrough de cima + StochRSI > 80")
-                    else:
-                        st.write("❌ Condições não atendidas")
+                    display_signals_table(signals_data, "sell")
                 
-                # Resumo da estratégia
-                st.subheader("📖 Estratégia de Barreiras EMA")
-                st.info("""
+                # Resumo geral
+                st.markdown("---")
+                st.subheader("📊 Resumo do Scanner")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Total Analisadas", len(analyzer.crypto_symbols))
+                
+                with col2:
+                    st.metric("Sinais de Compra", len(signals_data['buy_signals']))
+                
+                with col3:
+                    st.metric("Sinais de Venda", len(signals_data['sell_signals']))
+                
+                with col4:
+                    total_signals = len(signals_data['buy_signals']) + len(signals_data['sell_signals'])
+                    success_rate = (total_signals / len(analyzer.crypto_symbols)) * 100
+                    st.metric("Taxa de Sinais", f"{success_rate:.1f}%")
+                
+                # Mostrar erros se houver
+                if signals_data['errors']:
+                    st.warning(f"⚠️ Erros encontrados em {len(signals_data['errors'])} moedas:")
+                    with st.expander("Ver erros"):
+                        for error in signals_data['errors']:
+                            st.write(f"• {error}")
+        
+        # Informações sobre o scanner
+        st.markdown("---")
+        st.info("""
+        **ℹ️ Como usar o Scanner:**
+        
+        • **Timeframes menores** (1m, 5m): Sinais mais frequentes, mas menos confiáveis
+        • **Timeframes maiores** (1d): Sinais mais confiáveis, mas menos frequentes
+        • **Dias de Histórico**: Mais dias = indicadores mais estáveis
+        • **Atualização**: Execute o scanner regularmente para capturar novos sinais
+        """)
+    
+    # Informações adicionais
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**💡 Dados:** KuCoin API em tempo real")
+    st.sidebar.markdown(f"**🌍 Fuso:** Brasil (UTC-3)")
+    st.sidebar.markdown("**⚠️ Aviso:** Este não é um conselho financeiro.")
                 **Como Funciona:**
                 
                 🎯 **Barreiras EMA**: Cada ativo tem 3 barreiras personalizadas (rápida, média, lenta)
