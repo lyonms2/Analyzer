@@ -1,4 +1,4 @@
-def create_advanced_chart(data: pd.DataFrame, symbol: str) -> go.Figure:import streamlit as st
+import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
@@ -336,11 +336,9 @@ def display_signals_table(signals_data: Dict, signal_type: str):
     if signal_type == "buy":
         signals = signals_data['buy_signals']
         title = "🟢 OPORTUNIDADES DE COMPRA"
-        color = "green"
     else:
         signals = signals_data['sell_signals']
         title = "🔴 OPORTUNIDADES DE VENDA"
-        color = "red"
     
     if not signals:
         st.info(f"Nenhum sinal de {signal_type.upper()} encontrado no momento.")
@@ -393,6 +391,8 @@ def display_signals_table(signals_data: Dict, signal_type: str):
     with col3:
         avg_stoch = np.mean([s['stoch_k'] for s in signals])
         st.metric("Stoch K Médio", f"{avg_stoch:.1f}")
+
+def create_advanced_chart(data: pd.DataFrame, symbol: str) -> go.Figure:
     """Cria gráfico avançado com barreiras EMA"""
     fig = make_subplots(
         rows=4, cols=1,
@@ -617,7 +617,7 @@ def main():
                     # Aplicar indicadores e estratégia
                     data = analyzer.calculate_ema_barriers(data, selected_symbol)
                     data = analyzer.calculate_rsi_75(data)
-                    data = analyzer.calculate_stochastic_rsi(data)  # Usando Stochastic RSI agora
+                    data = analyzer.calculate_stochastic_rsi(data)
                     data = analyzer.apply_strategy(data)
                     
                     # Análise atual
@@ -703,44 +703,107 @@ def main():
                     # Resumo da estratégia
                     st.subheader("📖 Estratégia de Barreiras EMA")
                     st.info("""
-                    **Como Funciona:**
-                    
-                    🎯 **Barreiras EMA**: Cada ativo tem 3 barreiras personalizadas (rápida, média, lenta)
-                    
-                    📈 **Tendência**: Definida pela Barreira 3 - mudança só quando preço ultrapassa completamente
-                    
-                    🔢 **RSI 75 Períodos**: > 50 = Bull Market | < 50 = Bear Market
-                    
-                    ⚡ **Entrada**: Breakthrough da Barreira + StochRSI + RSI na mesma direção
-                    
-                    🟢 **LONG**: RSI > 50 + Preço rompeu barreira de baixo para cima + StochRSI < 20
-                    
-                    🔴 **SHORT**: RSI < 50 + Preço rompeu barreira de cima para baixo + StochRSI > 80
-                    """)
+**Como Funciona:**
+
+🎯 **Barreiras EMA**: Cada ativo tem 3 barreiras personalizadas (rápida, média, lenta)
+
+📈 **Tendência**: Definida pela Barreira 3 - mudança só quando preço ultrapassa completamente
+
+🔢 **RSI 75 Períodos**: > 50 = Bull Market | < 50 = Bear Market
+
+⚡ **Entrada**: Breakthrough da Barreira + StochRSI + RSI na mesma direção
+
+🟢 **LONG**: RSI > 50 + Preço rompeu barreira de baixo para cima + StochRSI < 20
+
+🔴 **SHORT**: RSI < 50 + Preço rompeu barreira de cima para baixo + StochRSI > 80
+""")
+    
+    with tab2:
+        st.header("🔍 Scanner de Todas as Criptomoedas")
+        st.markdown("Escaneia todas as 65 criptomoedas em busca de sinais de compra e venda.")
+        
+        # Configurações do scanner
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            scanner_timeframe = st.selectbox(
+                "Timeframe para Scanner:",
+                options=["1m", "5m", "15m", "30m", "1h", "4h", "1d"],
+                index=6,
+                key="scanner_tf"
+            )
+        
+        with col2:
+            scanner_days = st.number_input(
+                "Dias de Histórico:",
+                min_value=50,
+                max_value=500,
+                value=100,
+                key="scanner_days"
+            )
+        
+        with col3:
+            st.write("") # Espaço
+            scan_button = st.button("🚀 Escanear Todas as Moedas", type="primary", key="scan_all")
+        
+        if scan_button:
+            st.markdown("---")
+            
+            with st.spinner("🔍 Escaneando todas as criptomoedas..."):
+                # Executar scanner
+                signals_data = analyzer.scan_all_cryptos(scanner_timeframe, scanner_days)
+                
+                # Exibir resultados
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    display_signals_table(signals_data, "buy")
+                
+                with col2:
+                    display_signals_table(signals_data, "sell")
+                
+                # Resumo geral
+                st.markdown("---")
+                st.subheader("📊 Resumo do Scanner")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Total Analisadas", len(analyzer.crypto_symbols))
+                
+                with col2:
+                    st.metric("Sinais de Compra", len(signals_data['buy_signals']))
+                
+                with col3:
+                    st.metric("Sinais de Venda", len(signals_data['sell_signals']))
+                
+                with col4:
+                    total_signals = len(signals_data['buy_signals']) + len(signals_data['sell_signals'])
+                    success_rate = (total_signals / len(analyzer.crypto_symbols)) * 100
+                    st.metric("Taxa de Sinais", f"{success_rate:.1f}%")
+                
+                # Mostrar erros se houver
+                if signals_data['errors']:
+                    st.warning(f"⚠️ Erros encontrados em {len(signals_data['errors'])} moedas:")
+                    with st.expander("Ver erros"):
+                        for error in signals_data['errors']:
+                            st.write(f"• {error}")
+        
+        # Informações sobre o scanner
+        st.markdown("---")
+        st.info("""
+**ℹ️ Como usar o Scanner:**
+
+• **Timeframes menores** (1m, 5m): Sinais mais frequentes, mas menos confiáveis
+• **Timeframes maiores** (1d): Sinais mais confiáveis, mas menos frequentes
+• **Dias de Histórico**: Mais dias = indicadores mais estáveis
+• **Atualização**: Execute o scanner regularmente para capturar novos sinais
+""")
     
     # Informações adicionais
     st.sidebar.markdown("---")
     st.sidebar.markdown("**💡 Dados:** KuCoin API em tempo real")
     st.sidebar.markdown(f"**🌍 Fuso:** Brasil (UTC-3)")
-    st.sidebar.markdown("**⚠️ Aviso:** Este não é um conselho financeiro.")
-                **Como Funciona:**
-                
-                🎯 **Barreiras EMA**: Cada ativo tem 3 barreiras personalizadas (rápida, média, lenta)
-                
-                📈 **Tendência**: Definida pela Barreira 3 - mudança só quando preço ultrapassa completamente
-                
-                🔢 **RSI 75 Períodos**: > 50 = Bull Market | < 50 = Bear Market
-                
-                ⚡ **Entrada**: Breakthrough da Barreira + StochRSI + RSI na mesma direção
-                
-                🟢 **LONG**: RSI > 50 + Preço rompeu barreira de baixo para cima + StochRSI < 20
-                
-                🔴 **SHORT**: RSI < 50 + Preço rompeu barreira de cima para baixo + StochRSI > 80
-                """)
-    
-    # Informações adicionais
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**💡 Dados:** KuCoin API em tempo real")
     st.sidebar.markdown("**⚠️ Aviso:** Este não é um conselho financeiro.")
 
 if __name__ == "__main__":
