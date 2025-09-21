@@ -107,31 +107,60 @@ class KuCoinCryptoAnalyzer:
         ).rsi()
         return df
     
-    def calculate_stochastic(self, data: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> pd.DataFrame:
-        """Calcula Estocástico padrão"""
+    def calculate_stochastic_rsi(self, data: pd.DataFrame, rsi_period: int = 14, stoch_period: int = 14, k_smooth: int = 3, d_smooth: int = 3) -> pd.DataFrame:
+        """Calcula Stochastic RSI igual ao TradingView"""
         df = data.copy()
         
-        stoch = ta.momentum.StochasticOscillator(
-            high=df['High'],
-            low=df['Low'], 
-            close=df['Close'],
-            window=k_period,
-            smooth_window=d_period
-        )
+        # Primeiro calcular o RSI
+        rsi = ta.momentum.RSIIndicator(close=df['Close'], window=rsi_period).rsi()
         
-        df['Stoch_K'] = stoch.stoch()
-        df['Stoch_D'] = stoch.stoch_signal()
+        # Calcular o Stochastic do RSI manualmente para ficar igual ao TradingView
+        stoch_rsi_values = []
+        
+        for i in range(len(rsi)):
+            if i < stoch_period - 1:
+                stoch_rsi_values.append(np.nan)
+            else:
+                # Pegar os últimos stoch_period valores do RSI
+                rsi_period_values = rsi.iloc[i-stoch_period+1:i+1]
+                
+                if rsi_period_values.isna().any():
+                    stoch_rsi_values.append(np.nan)
+                else:
+                    # Calcular Stochastic RSI
+                    rsi_min = rsi_period_values.min()
+                    rsi_max = rsi_period_values.max()
+                    
+                    if rsi_max - rsi_min == 0:
+                        stoch_rsi_values.append(50)  # Valor neutro quando não há variação
+                    else:
+                        stoch_rsi = ((rsi.iloc[i] - rsi_min) / (rsi_max - rsi_min)) * 100
+                        stoch_rsi_values.append(stoch_rsi)
+        
+        # Aplicar suavização K
+        stoch_rsi_series = pd.Series(stoch_rsi_values, index=df.index)
+        df['StochRSI_Raw'] = stoch_rsi_series
+        
+        # %K = SMA do StochRSI Raw
+        df['Stoch_K'] = df['StochRSI_Raw'].rolling(window=k_smooth, min_periods=1).mean()
+        
+        # %D = SMA do %K
+        df['Stoch_D'] = df['Stoch_K'].rolling(window=d_smooth, min_periods=1).mean()
+        
+        # Remover coluna temporária
+        df.drop('StochRSI_Raw', axis=1, inplace=True)
         
         return df
     
-    def detect_barrier_respect(self, data: pd.DataFrame, lookback: int = 3) -> pd.DataFrame:
-        """Detecta quando o preço toca e respeita uma barreira"""
+    def detect_barrier_breakthrough(self, data: pd.DataFrame, lookback: int = 3) -> pd.DataFrame:
+        """Detecta quando o preço vem de baixo e fecha acima da barreira (compra) 
+        ou vem de cima e fecha abaixo da barreira (venda)"""
         df = data.copy()
         
-        # Inicializar colunas de respeito às barreiras
-        df['Respect_B1'] = 0
-        df['Respect_B2'] = 0  
-        df['Respect_B3'] = 0
+        # Inicializar colunas de breakthrough das barreiras
+        df['Breakthrough_B1'] = 0
+        df['Breakthrough_B2'] = 0  
+        df['Breakthrough_B3'] = 0
         
         for i in range(lookback, len(df)):
             current_close = df['Close'].iloc[i]
@@ -139,38 +168,35 @@ class KuCoinCryptoAnalyzer:
             
             # Verificar cada barreira
             barriers = ['Barreira_1', 'Barreira_2', 'Barreira_3']
-            respect_cols = ['Respect_B1', 'Respect_B2', 'Respect_B3']
+            breakthrough_cols = ['Breakthrough_B1', 'Breakthrough_B2', 'Breakthrough_B3']
             
-            for barrier, respect_col in zip(barriers, respect_cols):
+            for barrier, breakthrough_col in zip(barriers, breakthrough_cols):
                 barrier_value = df[barrier].iloc[i]
                 
                 if pd.isna(barrier_value):
                     continue
                 
-                # Verificar se houve toque e respeito
-                # Toque: preço chegou próximo da barreira (±0.5%)
-                touch_threshold = barrier_value * 0.005
+                # Verificar breakthrough de baixo para cima (sinal de compra)
+                # Condições: preços anteriores estavam abaixo da barreira E preço atual fechou acima
+                was_below = any(prev_close < barrier_value * 0.999 for prev_close in previous_closes)  # 0.1% tolerance
+                closed_above = current_close > barrier_value * 1.001  # 0.1% tolerance
                 
-                # Verificar se algum dos preços recentes tocou a barreira
-                touched = False
-                for prev_close in previous_closes:
-                    if abs(prev_close - barrier_value) <= touch_threshold:
-                        touched = True
-                        break
+                if was_below and closed_above:
+                    df.loc[df.index[i], breakthrough_col] = 1  # Sinal de compra
+                    continue
                 
-                if touched:
-                    # Verificar se respeitou (voltou na direção da tendência)
-                    if current_close > df['Barreira_3'].iloc[i]:  # Tendência de alta
-                        if current_close > barrier_value:  # Respeitou e voltou para cima
-                            df.loc[df.index[i], respect_col] = 1
-                    else:  # Tendência de baixa
-                        if current_close < barrier_value:  # Respeitou e voltou para baixo
-                            df.loc[df.index[i], respect_col] = -1
+                # Verificar breakthrough de cima para baixo (sinal de venda)
+                # Condições: preços anteriores estavam acima da barreira E preço atual fechou abaixo
+                was_above = any(prev_close > barrier_value * 1.001 for prev_close in previous_closes)
+                closed_below = current_close < barrier_value * 0.999
+                
+                if was_above and closed_below:
+                    df.loc[df.index[i], breakthrough_col] = -1  # Sinal de venda
         
         return df
     
     def apply_strategy(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Aplica a nova estratégia com barreiras"""
+        """Aplica a estratégia corrigida com breakthrough das barreiras"""
         df = data.copy()
         
         # Determinar tendência geral (Barreira 3)
@@ -180,24 +206,24 @@ class KuCoinCryptoAnalyzer:
         df['RSI_Bull'] = df['RSI_75'] > 50
         df['RSI_Bear'] = df['RSI_75'] < 50
         
-        # Sinais Estocástico
-        df['Stoch_Oversold'] = df['Stoch_K'] < 20  # Sinal de VENDA
-        df['Stoch_Overbought'] = df['Stoch_K'] > 80  # Sinal de COMPRA
+        # Sinais Estocástico RSI (CORRIGIDOS)
+        df['Stoch_Oversold'] = df['Stoch_K'] < 20   # Para COMPRA
+        df['Stoch_Overbought'] = df['Stoch_K'] > 80  # Para VENDA
         
-        # Detectar respeito às barreiras
-        df = self.detect_barrier_respect(df)
+        # Detectar breakthrough das barreiras
+        df = self.detect_barrier_breakthrough(df)
         
-        # Sinais combinados
+        # Sinais combinados CORRIGIDOS
         df['Long_Signal'] = (
-            (df['Stoch_Overbought']) &  # Estocástico sobrecomprado (sinal de compra)
-            ((df['Respect_B1'] == 1) | (df['Respect_B2'] == 1) | (df['Respect_B3'] == 1)) &  # Respeitando barreira
-            (df['RSI_Bull'])  # RSI > 50 (bull market)
+            (df['RSI_Bull']) &  # RSI > 50 (bull market)
+            ((df['Breakthrough_B1'] == 1) | (df['Breakthrough_B2'] == 1) | (df['Breakthrough_B3'] == 1)) &  # Preço veio de baixo e fechou acima da barreira
+            (df['Stoch_Oversold'])  # StochRSI < 20 (sobrevendido)
         ).astype(int)
         
         df['Short_Signal'] = (
-            (df['Stoch_Oversold']) &  # Estocástico sobrevendido (sinal de venda)
-            ((df['Respect_B1'] == -1) | (df['Respect_B2'] == -1) | (df['Respect_B3'] == -1)) &  # Respeitando barreira
-            (df['RSI_Bear'])  # RSI < 50 (bear market)
+            (df['RSI_Bear']) &  # RSI < 50 (bear market)
+            ((df['Breakthrough_B1'] == -1) | (df['Breakthrough_B2'] == -1) | (df['Breakthrough_B3'] == -1)) &  # Preço veio de cima e fechou abaixo da barreira
+            (df['Stoch_Overbought'])  # StochRSI > 80 (sobrecomprado)
         ).astype(int)
         
         # Sinal final
@@ -224,9 +250,9 @@ class KuCoinCryptoAnalyzer:
             'stoch_d': latest['Stoch_D'],
             'stoch_oversold': latest['Stoch_Oversold'],
             'stoch_overbought': latest['Stoch_Overbought'],
-            'respect_b1': latest['Respect_B1'],
-            'respect_b2': latest['Respect_B2'],
-            'respect_b3': latest['Respect_B3'],
+            'respect_b1': latest['Breakthrough_B1'],
+            'respect_b2': latest['Breakthrough_B2'],
+            'respect_b3': latest['Breakthrough_B3'],
             'final_signal': latest['Final_Signal'],
             'long_signal': latest['Long_Signal'],
             'short_signal': latest['Short_Signal']
@@ -241,7 +267,7 @@ def create_advanced_chart(data: pd.DataFrame, symbol: str) -> go.Figure:
         subplot_titles=(
             f'{symbol} - Preço e Barreiras EMA',
             'RSI 75 Períodos',
-            'Estocástico',
+            'Estocástico RSI',
             'Sinais de Entrada'
         ),
         row_heights=[0.5, 0.2, 0.2, 0.1]
@@ -278,19 +304,44 @@ def create_advanced_chart(data: pd.DataFrame, symbol: str) -> go.Figure:
             row=1, col=1
         )
     
-    # Pontos de respeito às barreiras
-    respect_data = data[(data['Respect_B1'] != 0) | (data['Respect_B2'] != 0) | (data['Respect_B3'] != 0)]
-    if not respect_data.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=respect_data.index,
-                y=respect_data['Close'],
-                mode='markers',
-                name='Respeito à Barreira',
-                marker=dict(color='yellow', size=8, symbol='diamond')
-            ),
-            row=1, col=1
-        )
+    # Pontos de breakthrough das barreiras
+    breakthrough_data = data[(data['Breakthrough_B1'] != 0) | (data['Breakthrough_B2'] != 0) | (data['Breakthrough_B3'] != 0)]
+    if not breakthrough_data.empty:
+        # Separar compras (breakthrough positivo) e vendas (breakthrough negativo)
+        buy_breakthroughs = breakthrough_data[
+            (breakthrough_data['Breakthrough_B1'] == 1) | 
+            (breakthrough_data['Breakthrough_B2'] == 1) | 
+            (breakthrough_data['Breakthrough_B3'] == 1)
+        ]
+        sell_breakthroughs = breakthrough_data[
+            (breakthrough_data['Breakthrough_B1'] == -1) | 
+            (breakthrough_data['Breakthrough_B2'] == -1) | 
+            (breakthrough_data['Breakthrough_B3'] == -1)
+        ]
+        
+        if not buy_breakthroughs.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=buy_breakthroughs.index,
+                    y=buy_breakthroughs['Close'],
+                    mode='markers',
+                    name='Breakthrough Compra',
+                    marker=dict(color='green', size=8, symbol='triangle-up')
+                ),
+                row=1, col=1
+            )
+        
+        if not sell_breakthroughs.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=sell_breakthroughs.index,
+                    y=sell_breakthroughs['Close'],
+                    mode='markers',
+                    name='Breakthrough Venda',
+                    marker=dict(color='red', size=8, symbol='triangle-down')
+                ),
+                row=1, col=1
+            )
     
     # RSI 75
     fig.add_trace(
@@ -308,12 +359,12 @@ def create_advanced_chart(data: pd.DataFrame, symbol: str) -> go.Figure:
     fig.add_annotation(x=data.index[-1], y=55, text="Bull > 50", row=2, col=1, showarrow=False)
     fig.add_annotation(x=data.index[-1], y=45, text="Bear < 50", row=2, col=1, showarrow=False)
     
-    # Estocástico
+    # Estocástico RSI
     fig.add_trace(
         go.Scatter(
             x=data.index,
             y=data['Stoch_K'],
-            name='Stoch %K',
+            name='StochRSI %K',
             line=dict(color='blue')
         ),
         row=3, col=1
@@ -323,13 +374,13 @@ def create_advanced_chart(data: pd.DataFrame, symbol: str) -> go.Figure:
         go.Scatter(
             x=data.index,
             y=data['Stoch_D'],
-            name='Stoch %D', 
+            name='StochRSI %D', 
             line=dict(color='orange')
         ),
         row=3, col=1
     )
     
-    # Linhas de referência Estocástico
+    # Linhas de referência Stochastic RSI
     fig.add_hline(y=80, line_dash="dash", line_color="red", row=3, col=1)
     fig.add_hline(y=20, line_dash="dash", line_color="green", row=3, col=1)
     
@@ -372,7 +423,7 @@ def create_advanced_chart(data: pd.DataFrame, symbol: str) -> go.Figure:
 
 def main():
     st.title("₿ Analisador de Criptomoedas - Estratégia de Barreiras EMA")
-    st.markdown("**Nova estratégia: Barreiras EMA + RSI 75 + Estocástico com Respeito às Barreiras**")
+    st.markdown("**Nova estratégia: Barreiras EMA + RSI 75 + Estocástico RSI com Respeito às Barreiras**")
     
     # Inicializar analisador
     analyzer = KuCoinCryptoAnalyzer()
@@ -423,7 +474,7 @@ def main():
                 # Aplicar indicadores e estratégia
                 data = analyzer.calculate_ema_barriers(data, selected_symbol)
                 data = analyzer.calculate_rsi_75(data)
-                data = analyzer.calculate_stochastic(data)
+                data = analyzer.calculate_stochastic_rsi(data)  # Usando Stochastic RSI agora
                 data = analyzer.apply_strategy(data)
                 
                 # Análise atual
@@ -466,7 +517,7 @@ def main():
                     st.write(f"• Barreira 2: ${analysis['barreira_2']:.6f}")
                     st.write(f"• Barreira 3: ${analysis['barreira_3']:.6f}")
                     
-                    st.write("**Estocástico:**")
+                    st.write("**Estocástico RSI:**")
                     st.write(f"• %K: {analysis['stoch_k']:.1f}")
                     st.write(f"• %D: {analysis['stoch_d']:.1f}")
                     
@@ -475,29 +526,34 @@ def main():
                     st.write(f"• Status: {oversold_text}{overbought_text}")
                 
                 with col2:
-                    st.write("**Respeito às Barreiras:**")
-                    respect_texts = []
-                    if analysis['respect_b1'] != 0:
-                        direction = "↑" if analysis['respect_b1'] > 0 else "↓"
-                        respect_texts.append(f"• Barreira 1: {direction}")
-                    if analysis['respect_b2'] != 0:
-                        direction = "↑" if analysis['respect_b2'] > 0 else "↓"
-                        respect_texts.append(f"• Barreira 2: {direction}")
-                    if analysis['respect_b3'] != 0:
-                        direction = "↑" if analysis['respect_b3'] > 0 else "↓"
-                        respect_texts.append(f"• Barreira 3: {direction}")
+                    st.write("**Breakthrough das Barreiras:**")
+                    breakthrough_texts = []
+                    if analysis['respect_b1'] == 1:
+                        breakthrough_texts.append("• Barreira 1: ↗️ Rompeu de baixo")
+                    elif analysis['respect_b1'] == -1:
+                        breakthrough_texts.append("• Barreira 1: ↘️ Rompeu de cima")
                     
-                    if respect_texts:
-                        for text in respect_texts:
+                    if analysis['respect_b2'] == 1:
+                        breakthrough_texts.append("• Barreira 2: ↗️ Rompeu de baixo")
+                    elif analysis['respect_b2'] == -1:
+                        breakthrough_texts.append("• Barreira 2: ↘️ Rompeu de cima")
+                        
+                    if analysis['respect_b3'] == 1:
+                        breakthrough_texts.append("• Barreira 3: ↗️ Rompeu de baixo")
+                    elif analysis['respect_b3'] == -1:
+                        breakthrough_texts.append("• Barreira 3: ↘️ Rompeu de cima")
+                    
+                    if breakthrough_texts:
+                        for text in breakthrough_texts:
                             st.write(text)
                     else:
-                        st.write("• Nenhuma barreira respeitada recentemente")
+                        st.write("• Nenhuma barreira rompida recentemente")
                     
                     st.write("**Condições de Entrada:**")
                     if analysis['long_signal']:
-                        st.write("✅ **LONG**: Estoc sobrecomprado + Barreira respeitada + RSI Bull")
+                        st.write("✅ **LONG**: RSI > 50 + Breakthrough de baixo + StochRSI < 20")
                     elif analysis['short_signal']:
-                        st.write("✅ **SHORT**: Estoc sobrevendido + Barreira respeitada + RSI Bear")
+                        st.write("✅ **SHORT**: RSI < 50 + Breakthrough de cima + StochRSI > 80")
                     else:
                         st.write("❌ Condições não atendidas")
                 
@@ -512,11 +568,11 @@ def main():
                 
                 🔢 **RSI 75 Períodos**: > 50 = Bull Market | < 50 = Bear Market
                 
-                ⚡ **Entrada**: Estocástico + Respeito à Barreira + RSI na mesma direção
+                ⚡ **Entrada**: Breakthrough da Barreira + StochRSI + RSI na mesma direção
                 
-                🟢 **LONG**: Estocástico sobrecomprado (>80) + Toca e respeita barreira + RSI > 50
+                🟢 **LONG**: RSI > 50 + Preço rompeu barreira de baixo para cima + StochRSI < 20
                 
-                🔴 **SHORT**: Estocástico sobrevendido (<20) + Toca e respeita barreira + RSI < 50
+                🔴 **SHORT**: RSI < 50 + Preço rompeu barreira de cima para baixo + StochRSI > 80
                 """)
     
     # Informações adicionais
