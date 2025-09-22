@@ -126,7 +126,7 @@ class SimplifiedCryptoAnalyzer:
             b2_status = analyze_barrier(current_close, previous_close, b2_current, b2_previous)
             b3_status = analyze_barrier(current_close, previous_close, b3_current, b3_previous)
             
-            # Estocástico RSI
+            # Estocástico RSI com direção e cruzamentos
             rsi_14 = ta.momentum.RSIIndicator(close=data['Close'], window=14).rsi()
             
             # Calcular Stochastic RSI manualmente
@@ -149,11 +149,68 @@ class SimplifiedCryptoAnalyzer:
                             stoch_rsi = ((rsi_14.iloc[i] - rsi_min) / (rsi_max - rsi_min)) * 100
                             stoch_rsi_values.append(stoch_rsi)
             
-            # Suavização K (3 períodos)
+            # Suavização K e D
             stoch_rsi_series = pd.Series(stoch_rsi_values, index=data.index)
             stoch_k = stoch_rsi_series.rolling(window=3, min_periods=1).mean()
+            stoch_d = stoch_k.rolling(window=3, min_periods=1).mean()
             
-            stoch_value = stoch_k.iloc[-1]
+            # Valores atuais e anteriores
+            k_current = stoch_k.iloc[-1]
+            k_previous = stoch_k.iloc[-2]
+            d_current = stoch_d.iloc[-1]
+            d_previous = stoch_d.iloc[-2]
+            
+            # Detectar direção e cruzamentos
+            def analyze_stochastic(k_curr, k_prev, d_curr, d_prev):
+                # Detectar cruzamentos
+                k_cross_d_up = k_prev <= d_prev and k_curr > d_curr  # K cruzou D de baixo para cima
+                k_cross_d_down = k_prev >= d_prev and k_curr < d_curr  # K cruzou D de cima para baixo
+                
+                # Detectar direção
+                k_diff = k_curr - k_prev
+                is_rising = k_diff > 0.5
+                is_falling = k_diff < -0.5
+                is_sideways = abs(k_diff) <= 0.5
+                
+                # Determinar zona
+                in_oversold = k_curr < 20
+                in_overbought = k_curr > 80
+                in_neutral = 20 <= k_curr <= 80
+                
+                # Criar símbolo visual
+                if in_oversold:
+                    if k_cross_d_up:
+                        return f"⚡🚀 {k_curr:.1f}"  # SETUP PERFEITO compra
+                    elif is_rising:
+                        return f"🟢📈 {k_curr:.1f}"  # Sobrevenda subindo
+                    elif is_falling:
+                        return f"🟢📉 {k_curr:.1f}"  # Sobrevenda descendo
+                    else:
+                        return f"🟢➡️ {k_curr:.1f}"   # Sobrevenda lateral
+                        
+                elif in_overbought:
+                    if k_cross_d_down:
+                        return f"💀💥 {k_curr:.1f}"  # SETUP PERFEITO venda
+                    elif is_falling:
+                        return f"🔴📉 {k_curr:.1f}"  # Sobrecompra descendo
+                    elif is_rising:
+                        return f"🔴📈 {k_curr:.1f}"  # Sobrecompra subindo
+                    else:
+                        return f"🔴➡️ {k_curr:.1f}"   # Sobrecompra lateral
+                        
+                else:  # Zona neutra
+                    if k_cross_d_up:
+                        return f"🚀 {k_curr:.1f}"     # Cruzamento alta
+                    elif k_cross_d_down:
+                        return f"💥 {k_curr:.1f}"     # Cruzamento baixa
+                    elif is_rising:
+                        return f"📈 {k_curr:.1f}"     # Subindo
+                    elif is_falling:
+                        return f"📉 {k_curr:.1f}"     # Descendo
+                    else:
+                        return f"➡️ {k_curr:.1f}"      # Lateral
+            
+            stoch_visual = analyze_stochastic(k_current, k_previous, d_current, d_previous)
             
             return {
                 'symbol': symbol,
@@ -162,7 +219,7 @@ class SimplifiedCryptoAnalyzer:
                 'b1': b1_status,
                 'b2': b2_status,
                 'b3': b3_status,
-                'stochastic': f"{stoch_value:.1f}",
+                'stochastic': stoch_visual,
                 'timestamp': data.index[-1].strftime('%H:%M')
             }
             
@@ -223,19 +280,21 @@ def style_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         return ''
     
     def highlight_stoch(val):
-        try:
-            stoch_val = float(val)
-            if stoch_val > 80:
-                return 'background-color: #FFE4E1; color: red; font-weight: bold'
-            elif stoch_val < 20:
-                return 'background-color: #E1FFE1; color: green; font-weight: bold'
-        except:
-            pass
+        if "⚡🚀" in val or "💀💥" in val:  # Setups perfeitos
+            return 'background-color: #FFD700; color: black; font-weight: bold; font-size: 14px'
+        elif "🟢" in val:  # Zona sobrevenda
+            return 'background-color: #E8F5E8; color: green; font-weight: bold'
+        elif "🔴" in val:  # Zona sobrecompra
+            return 'background-color: #FFE8E8; color: red; font-weight: bold'
+        elif "🚀" in val:  # Cruzamento alta zona neutra
+            return 'background-color: #E8F8FF; color: blue; font-weight: bold'
+        elif "💥" in val:  # Cruzamento baixa zona neutra
+            return 'background-color: #FFF0E8; color: orange; font-weight: bold'
         return ''
     
     styled = df.style.map(highlight_signals, subset=['B1', 'B2', 'B3'])
     styled = styled.map(highlight_rsi, subset=['RSI'])
-    styled = styled.map(highlight_stoch, subset=['Estocástico'])
+    styled = styled.map(highlight_stoch, subset=['Stoch Direção'])
     
     return styled
 
@@ -288,10 +347,12 @@ def main():
         st.markdown("• % Distância da linha")
     
     with col3:
-        st.markdown("**Estocástico RSI:**")
-        st.markdown("• > 80: Sobrecomprado")
-        st.markdown("• < 20: Sobrevendido")
-        st.markdown("• 20-80: Neutro")
+        st.markdown("**Estocástico Direção:**")
+        st.markdown("• ⚡🚀 Setup PERFEITO compra")
+        st.markdown("• 💀💥 Setup PERFEITO venda")
+        st.markdown("• 🟢📈📉 Sobrevenda (↑↓)")
+        st.markdown("• 🔴📈📉 Sobrecompra (↑↓)")
+        st.markdown("• 🚀💥 Cruzamentos zona neutra")
     
     with col4:
         st.markdown("**Configurações EMA:**")
@@ -312,7 +373,7 @@ def main():
                 
                 # Renomear colunas
                 df_display = df[['symbol', 'price', 'rsi', 'b1', 'b2', 'b3', 'stochastic', 'timestamp']].copy()
-                df_display.columns = ['Moeda', 'Preço', 'RSI', 'B1', 'B2', 'B3', 'Estocástico', 'Última Atualização']
+                df_display.columns = ['Moeda', 'Preço', 'RSI', 'B1', 'B2', 'B3', 'Stoch Direção', 'Última Atualização']
                 
                 # Formatar preço
                 df_display['Preço'] = df_display['Preço'].apply(lambda x: f"${x:.6f}")
@@ -344,11 +405,12 @@ def main():
                 
                 # Estocástico
                 try:
-                    stoch_values = [float(r['stochastic']) for r in results if r['stochastic'].replace('.', '').replace('-', '').isdigit()]
-                    stoch_overbought = len([s for s in stoch_values if s > 80])
-                    stoch_oversold = len([s for s in stoch_values if s < 20])
+                    stoch_perfect_buy = len([r for r in results if "⚡🚀" in r['stochastic']])
+                    stoch_perfect_sell = len([r for r in results if "💀💥" in r['stochastic']])
+                    stoch_oversold = len([r for r in results if "🟢" in r['stochastic']])
+                    stoch_overbought = len([r for r in results if "🔴" in r['stochastic']])
                 except:
-                    stoch_overbought = stoch_oversold = 0
+                    stoch_perfect_buy = stoch_perfect_sell = stoch_oversold = stoch_overbought = 0
                 
                 col1, col2, col3, col4 = st.columns(4)
                 
@@ -368,10 +430,12 @@ def main():
                     st.metric("B3 Venda 🔴", b3_sell)
                 
                 with col4:
-                    st.metric("Stoch > 80", stoch_overbought)
-                    st.metric("Stoch < 20", stoch_oversold)
+                    st.metric("⚡ Setups Perfeitos", stoch_perfect_buy + stoch_perfect_sell)
+                    st.metric("⚡🚀 Perfect BUY", stoch_perfect_buy)
+                    st.metric("💀💥 Perfect SELL", stoch_perfect_sell)
                     total_signals = b1_buy + b1_sell + b2_buy + b2_sell + b3_buy + b3_sell
-                    st.metric("Total Sinais", total_signals)
+                    st.metric("🟢 Zona Sobrevenda", stoch_oversold)
+                    st.metric("🔴 Zona Sobrecompra", stoch_overbought)
                 
                 # Botão para exportar
                 st.markdown("---")
@@ -396,7 +460,13 @@ def main():
 **% Positiva**: Preço acima da EMA (distância em %)
 **% Negativa**: Preço abaixo da EMA (distância em %)
 
-**Dica**: Combine RSI Bull/Bear + Cruzamentos das barreiras + Estocástico para suas decisões!
+**Stochastic Direção:**
+⚡🚀 **Setup PERFEITO Compra**: StochRSI cruzou na sobrevenda
+💀💥 **Setup PERFEITO Venda**: StochRSI cruzou na sobrecompra  
+🟢📈📉 **Sobrevenda**: <20, subindo/descendo (oportunidade)
+🔴📈📉 **Sobrecompra**: >80, subindo/descendo (cuidado)
+
+**Dica**: Combine RSI Bull + Cruzamentos EMA + Setups Perfeitos do Stoch para máxima probabilidade!
 """)
     
     st.markdown("**⚠️ Aviso:** Este não é um conselho financeiro. Sempre faça sua própria análise.")
