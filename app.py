@@ -336,9 +336,9 @@ def style_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                 return 'color: red; font-weight: bold'
         def highlight_mean_reversion(val):
         if "🔥💚" in val:  # Extreme buy - fundo perfeito
-            return 'background-color: #00FF00; color: black; font-weight: bold; font-size: 14px; animation: blink 1s linear infinite'
+            return 'background-color: #00FF00; color: black; font-weight: bold; font-size: 14px'
         elif "🔥❤️" in val:  # Extreme sell - topo perfeito  
-            return 'background-color: #FF0000; color: white; font-weight: bold; font-size: 14px; animation: blink 1s linear infinite'
+            return 'background-color: #FF0000; color: white; font-weight: bold; font-size: 14px'
         elif "🟢📈" in val:  # Oversold opportunity
             return 'background-color: #90EE90; color: darkgreen; font-weight: bold'
         elif "🔴📉" in val:  # Overbought opportunity
