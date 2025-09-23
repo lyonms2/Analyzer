@@ -1,4 +1,13 @@
-import streamlit as st
+with col4:
+                    st.metric("⚡ Setups Perfeitos", stoch_perfect_buy + stoch_perfect_sell)
+                    st.metric("⚡🚀 Perfect BUY", stoch_perfect_buy)
+                    st.metric("💀💥 Perfect SELL", stoch_perfect_sell)
+                    st.metric("🟢 Zona Sobrevenda", stoch_oversold)
+                    st.metric("🔴 Zona Sobrecompra", stoch_overbought)    with col4:
+        st.markdown("**Configurações EMA:**")
+        st.markdown("• B1: EMA Rápida")
+        st.markdown("• B2: EMA Média")
+        st.markdown("• B3: EMA Lenta")import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
@@ -212,6 +221,60 @@ class SimplifiedCryptoAnalyzer:
             
             stoch_visual = analyze_stochastic(k_current, k_previous, d_current, d_previous)
             
+            # Mean Reversion Analysis - Distância da Média
+            # Calcular média móvel de 20 períodos e desvio padrão
+            sma_20 = data['Close'].rolling(window=20).mean().iloc[-1]
+            std_20 = data['Close'].rolling(window=20).std().iloc[-1]
+            
+            # Z-Score (distância em desvios padrão)
+            z_score = (current_close - sma_20) / std_20
+            
+            # Distância percentual da média
+            distance_pct = ((current_close - sma_20) / sma_20) * 100
+            
+            # RSI para confluência de extremos
+            rsi_14_current = rsi_14.iloc[-1]
+            
+            # Bollinger Bands
+            bb_upper = sma_20 + (2 * std_20)
+            bb_lower = sma_20 - (2 * std_20)
+            
+            def analyze_mean_reversion(price, sma, z_score, distance_pct, rsi_14, bb_upper, bb_lower):
+                """Analisa oportunidades de mean reversion"""
+                
+                # Extremos matematicamente definidos
+                extreme_oversold = z_score < -2.0 and rsi_14 < 25  # Fundo extremo
+                extreme_overbought = z_score > 2.0 and rsi_14 > 75  # Topo extremo
+                
+                # Oportunidades de mean reversion
+                oversold_opportunity = z_score < -1.5 and distance_pct < -10  # Oportunidade de compra
+                overbought_opportunity = z_score > 1.5 and distance_pct > 10   # Oportunidade de venda
+                
+                # Zona de breakout (próximo da média)
+                breakout_zone = abs(z_score) < 0.5 and abs(distance_pct) < 5
+                
+                # Estados visuais
+                if extreme_oversold and price < bb_lower:
+                    return f"🔥💚 {distance_pct:+.1f}%"  # EXTREME BUY - fundo perfeito
+                elif extreme_overbought and price > bb_upper:
+                    return f"🔥❤️ {distance_pct:+.1f}%"  # EXTREME SELL - topo perfeito
+                elif oversold_opportunity:
+                    return f"🟢📈 {distance_pct:+.1f}%"  # OVERSOLD - oportunidade compra
+                elif overbought_opportunity:
+                    return f"🔴📉 {distance_pct:+.1f}%"  # OVERBOUGHT - oportunidade venda
+                elif breakout_zone:
+                    return f"🔵⚡ {distance_pct:+.1f}%"   # BREAKOUT ZONE - usar EMAs
+                else:
+                    # Zona neutra com direção
+                    if distance_pct > 0:
+                        return f"⚪↗️ {distance_pct:+.1f}%"  # Acima da média
+                    else:
+                        return f"⚪↘️ {distance_pct:+.1f}%"  # Abaixo da média
+            
+            mean_reversion_signal = analyze_mean_reversion(
+                current_close, sma_20, z_score, distance_pct, rsi_14_current, bb_upper, bb_lower
+            )
+            
             return {
                 'symbol': symbol,
                 'price': current_close,
@@ -220,6 +283,7 @@ class SimplifiedCryptoAnalyzer:
                 'b2': b2_status,
                 'b3': b3_status,
                 'stochastic': stoch_visual,
+                'mean_reversion': mean_reversion_signal,
                 'timestamp': data.index[-1].strftime('%H:%M')
             }
             
@@ -270,6 +334,19 @@ def style_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                 return 'color: green; font-weight: bold'
             elif val.startswith('-'):
                 return 'color: red; font-weight: bold'
+        def highlight_mean_reversion(val):
+        if "🔥💚" in val:  # Extreme buy - fundo perfeito
+            return 'background-color: #00FF00; color: black; font-weight: bold; font-size: 14px; animation: blink 1s linear infinite'
+        elif "🔥❤️" in val:  # Extreme sell - topo perfeito  
+            return 'background-color: #FF0000; color: white; font-weight: bold; font-size: 14px; animation: blink 1s linear infinite'
+        elif "🟢📈" in val:  # Oversold opportunity
+            return 'background-color: #90EE90; color: darkgreen; font-weight: bold'
+        elif "🔴📉" in val:  # Overbought opportunity
+            return 'background-color: #FFB6C1; color: darkred; font-weight: bold'
+        elif "🔵⚡" in val:  # Breakout zone
+            return 'background-color: #87CEEB; color: darkblue; font-weight: bold'
+        elif "⚪" in val:  # Neutral zone
+            return 'background-color: #F5F5F5; color: gray; font-weight: normal'
         return ''
     
     def highlight_rsi(val):
@@ -295,6 +372,7 @@ def style_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     styled = df.style.map(highlight_signals, subset=['B1', 'B2', 'B3'])
     styled = styled.map(highlight_rsi, subset=['RSI'])
     styled = styled.map(highlight_stoch, subset=['Stoch Direção'])
+    styled = styled.map(highlight_mean_reversion, subset=['Mean Reversion'])
     
     return styled
 
@@ -333,7 +411,7 @@ def main():
     
     # Legenda
     st.markdown("---")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.markdown("**RSI 75:**")
@@ -354,11 +432,14 @@ def main():
         st.markdown("• 🔴📈📉 Sobrecompra (↑↓)")
         st.markdown("• 🚀💥 Cruzamentos zona neutra")
     
-    with col4:
-        st.markdown("**Configurações EMA:**")
-        st.markdown("• B1: EMA Rápida")
-        st.markdown("• B2: EMA Média")
-        st.markdown("• B3: EMA Lenta")
+    with col5:
+        st.markdown("**Mean Reversion:**")
+        st.markdown("• 🔥💚 EXTREME BUY (fundo)")
+        st.markdown("• 🔥❤️ EXTREME SELL (topo)")
+        st.markdown("• 🟢📈 Oversold (oportunidade)")
+        st.markdown("• 🔴📉 Overbought (oportunidade)")
+        st.markdown("• 🔵⚡ Breakout Zone (usar EMAs)")
+        st.markdown("• ⚪ Neutro (↗️↘️ direção)")
     
     st.markdown("---")
     
@@ -372,8 +453,8 @@ def main():
                 df = pd.DataFrame(results)
                 
                 # Renomear colunas
-                df_display = df[['symbol', 'price', 'rsi', 'b1', 'b2', 'b3', 'stochastic', 'timestamp']].copy()
-                df_display.columns = ['Moeda', 'Preço', 'RSI', 'B1', 'B2', 'B3', 'Stoch Direção', 'Última Atualização']
+                df_display = df[['symbol', 'price', 'rsi', 'b1', 'b2', 'b3', 'stochastic', 'mean_reversion', 'timestamp']].copy()
+                df_display.columns = ['Moeda', 'Preço', 'RSI', 'B1', 'B2', 'B3', 'Stoch Direção', 'Mean Reversion', 'Última Atualização']
                 
                 # Formatar preço
                 df_display['Preço'] = df_display['Preço'].apply(lambda x: f"${x:.6f}")
@@ -412,7 +493,17 @@ def main():
                 except:
                     stoch_perfect_buy = stoch_perfect_sell = stoch_oversold = stoch_overbought = 0
                 
-                col1, col2, col3, col4 = st.columns(4)
+                # Mean Reversion stats
+                try:
+                    extreme_buy = len([r for r in results if "🔥💚" in r['mean_reversion']])
+                    extreme_sell = len([r for r in results if "🔥❤️" in r['mean_reversion']])
+                    oversold_ops = len([r for r in results if "🟢📈" in r['mean_reversion']])
+                    overbought_ops = len([r for r in results if "🔴📉" in r['mean_reversion']])
+                    breakout_zone = len([r for r in results if "🔵⚡" in r['mean_reversion']])
+                except:
+                    extreme_buy = extreme_sell = oversold_ops = overbought_ops = breakout_zone = 0
+                
+                col1, col2, col3, col4, col5 = st.columns(5)
                 
                 with col1:
                     st.metric("Total Analisadas", len(results))
@@ -429,13 +520,13 @@ def main():
                     st.metric("B2 Venda 🔴", b2_sell)
                     st.metric("B3 Venda 🔴", b3_sell)
                 
-                with col4:
-                    st.metric("⚡ Setups Perfeitos", stoch_perfect_buy + stoch_perfect_sell)
-                    st.metric("⚡🚀 Perfect BUY", stoch_perfect_buy)
-                    st.metric("💀💥 Perfect SELL", stoch_perfect_sell)
-                    total_signals = b1_buy + b1_sell + b2_buy + b2_sell + b3_buy + b3_sell
-                    st.metric("🟢 Zona Sobrevenda", stoch_oversold)
-                    st.metric("🔴 Zona Sobrecompra", stoch_overbought)
+                with col5:
+                    st.metric("🔥 Extremes Total", extreme_buy + extreme_sell)
+                    st.metric("🔥💚 Extreme BUY", extreme_buy)
+                    st.metric("🔥❤️ Extreme SELL", extreme_sell)
+                    st.metric("🟢 Oversold Ops", oversold_ops)
+                    st.metric("🔴 Overbought Ops", overbought_ops)
+                    st.metric("🔵 Breakout Zone", breakout_zone)
                 
                 # Botão para exportar
                 st.markdown("---")
@@ -455,6 +546,7 @@ def main():
     st.info("""
 **ℹ️ Como interpretar:**
 
+**Barreiras EMA:**
 🟢 **Compra**: Preço cruzou EMA de baixo para cima (momentum de alta)
 🔴 **Venda**: Preço cruzou EMA de cima para baixo (momentum de baixa)
 **% Positiva**: Preço acima da EMA (distância em %)
@@ -466,7 +558,19 @@ def main():
 🟢📈📉 **Sobrevenda**: <20, subindo/descendo (oportunidade)
 🔴📈📉 **Sobrecompra**: >80, subindo/descendo (cuidado)
 
-**Dica**: Combine RSI Bull + Cruzamentos EMA + Setups Perfeitos do Stoch para máxima probabilidade!
+**Mean Reversion (Nova!):**
+🔥💚 **EXTREME BUY**: Fundo matemático perfeito (Z-Score < -2.0 + RSI < 25)
+🔥❤️ **EXTREME SELL**: Topo matemático perfeito (Z-Score > 2.0 + RSI > 75)
+🟢📈 **Oversold**: Oportunidade de compra (distância > -10% da média)
+🔴📉 **Overbought**: Oportunidade de venda (distância > +10% da média)
+🔵⚡ **Breakout Zone**: Use estratégia EMA (próximo da média ±5%)
+
+**Estratégias Combinadas:**
+• **🔥 Extremes** = Mean Reversion (maior probabilidade)
+• **🔵 Breakout Zone** = Use barreiras EMA + Stochastic
+• **⚡ Setups Perfeitos** = Combine ambas as estratégias!
+
+**Dica MASTER**: Priorize 🔥💚 e 🔥❤️ (extremos) > ⚡🚀 e 💀💥 (stoch perfeitos) > demais sinais!
 """)
     
     st.markdown("**⚠️ Aviso:** Este não é um conselho financeiro. Sempre faça sua própria análise.")
