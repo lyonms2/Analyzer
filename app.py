@@ -1,13 +1,4 @@
-with col4:
-                    st.metric("⚡ Setups Perfeitos", stoch_perfect_buy + stoch_perfect_sell)
-                    st.metric("⚡🚀 Perfect BUY", stoch_perfect_buy)
-                    st.metric("💀💥 Perfect SELL", stoch_perfect_sell)
-                    st.metric("🟢 Zona Sobrevenda", stoch_oversold)
-                    st.metric("🔴 Zona Sobrecompra", stoch_overbought)    with col4:
-        st.markdown("**Configurações EMA:**")
-        st.markdown("• B1: EMA Rápida")
-        st.markdown("• B2: EMA Média")
-        st.markdown("• B3: EMA Lenta")import streamlit as st
+import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
@@ -334,7 +325,9 @@ def style_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                 return 'color: green; font-weight: bold'
             elif val.startswith('-'):
                 return 'color: red; font-weight: bold'
-        def highlight_mean_reversion(val):
+        return ''
+    
+    def highlight_mean_reversion(val):
         if "🔥💚" in val:  # Extreme buy - fundo perfeito
             return 'background-color: #00FF00; color: black; font-weight: bold; font-size: 14px'
         elif "🔥❤️" in val:  # Extreme sell - topo perfeito  
@@ -431,6 +424,12 @@ def main():
         st.markdown("• 🟢📈📉 Sobrevenda (↑↓)")
         st.markdown("• 🔴📈📉 Sobrecompra (↑↓)")
         st.markdown("• 🚀💥 Cruzamentos zona neutra")
+
+    with col4:
+        st.markdown("**Configurações EMA:**")
+        st.markdown("• B1: EMA Rápida")
+        st.markdown("• B2: EMA Média")
+        st.markdown("• B3: EMA Lenta")
     
     with col5:
         st.markdown("**Mean Reversion:**")
@@ -520,13 +519,19 @@ def main():
                     st.metric("B2 Venda 🔴", b2_sell)
                     st.metric("B3 Venda 🔴", b3_sell)
                 
+                with col4:
+                    st.metric("⚡ Setups Perfeitos", stoch_perfect_buy + stoch_perfect_sell)
+                    st.metric("⚡🚀 Perfect BUY", stoch_perfect_buy)
+                    st.metric("💀💥 Perfect SELL", stoch_perfect_sell)
+                    st.metric("🟢 Zona Sobrevenda", stoch_oversold)
+                    st.metric("🔴 Zona Sobrecompra", stoch_overbought)
+                
                 with col5:
                     st.metric("🔥 Extremes Total", extreme_buy + extreme_sell)
                     st.metric("🔥💚 Extreme BUY", extreme_buy)
                     st.metric("🔥❤️ Extreme SELL", extreme_sell)
                     st.metric("🟢 Oversold Ops", oversold_ops)
                     st.metric("🔴 Overbought Ops", overbought_ops)
-                    st.metric("🔵 Breakout Zone", breakout_zone)
                 
                 # Botão para exportar
                 st.markdown("---")
@@ -558,7 +563,7 @@ def main():
 🟢📈📉 **Sobrevenda**: <20, subindo/descendo (oportunidade)
 🔴📈📉 **Sobrecompra**: >80, subindo/descendo (cuidado)
 
-**Mean Reversion (Nova!):**
+**Mean Reversion:**
 🔥💚 **EXTREME BUY**: Fundo matemático perfeito (Z-Score < -2.0 + RSI < 25)
 🔥❤️ **EXTREME SELL**: Topo matemático perfeito (Z-Score > 2.0 + RSI > 75)
 🟢📈 **Oversold**: Oportunidade de compra (distância > -10% da média)
