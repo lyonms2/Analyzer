@@ -11,7 +11,7 @@ CRYPTO_LIST = [
     'XLM/USDT', 'FIL/USDT', 'APT/USDT', 'SUI/USDT', 'HBAR/USDT', 'ZORA/USDT', 
     'AR/USDT', 'INJ/USDT', 'PEPE/USDT', 'NEAR/USDT', 'STX/USDT', 'ALGO/USDT', 
     'IMX/USDT', 'WIF/USDT', 'MINA/USDT', 'DYDX/USDT', 'TIA/USDT', 'JTO/USDT', 
-    'AAVE/USDT', 'PYTH/USDT', 'SAND/USDT', 'CAKE/USDT', 'XMR/USDT', 'BLUR/USDT', 
+    'AAVE/USDT', 'PYTH/USDT', 'SAND/USDT', 'CAKE/USDT', 'BLUR/USDT', 
     'GMX/USDT', 'LDO/USDT', 'FET/USDT', 'DYM/USDT', 'GMT/USDT', 'MEME/USDT', 
     'BOME/USDT', 'YGG/USDT', 'RUNE/USDT', 'CELO/USDT', 'WLD/USDT', 'ONDO/USDT', 
     'SEI/USDT', 'JUP/USDT', 'POPCAT/USDT', 'TAO/USDT', 'TON/USDT'
@@ -24,26 +24,26 @@ EMA_BARRIERS = {
     'BTC/USDT': {
         'barreira_1': 21,   # EMA rápida - movimentos de curto prazo
         'barreira_2': 50,   # EMA média - confirmação de tendência  
-        'barreira_3': 200   # EMA lenta - tendência de longo prazo
+        'barreira_3': 100   # EMA lenta - tendência de longo prazo
     },
     
     'ETH/USDT': {
         'barreira_1': 21,
         'barreira_2': 50,
-        'barreira_3': 200
+        'barreira_3': 100
     },
     
     # === TIER 2: LARGE CAPS ===
     'BNB/USDT': {
-        'barreira_1': 20,
+        'barreira_1': 21,
         'barreira_2': 50,
-        'barreira_3': 200
+        'barreira_3': 100
     },
     
     'SOL/USDT': {
-        'barreira_1': 18,   # Mais volátil, EMA mais rápida
-        'barreira_2': 45,
-        'barreira_3': 180
+        'barreira_1': 17,   # Mais volátil, EMA mais rápida
+        'barreira_2': 50,
+        'barreira_3': 110
     },
     
     'ADA/USDT': {
