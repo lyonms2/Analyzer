@@ -41,69 +41,69 @@ EMA_BARRIERS = {
     },
     
     'SOL/USDT': {
-        'barreira_1': 17,   # Mais volátil, EMA mais rápida
+        'barreira_1': 21,   # Mais volátil, EMA mais rápida
         'barreira_2': 50,
-        'barreira_3': 110
+        'barreira_3': 100
     },
     
     'ADA/USDT': {
         'barreira_1': 21,
         'barreira_2': 55,
-        'barreira_3': 200
+        'barreira_3': 100
     },
     
     'XRP/USDT': {
-        'barreira_1': 20,
-        'barreira_2': 50,
-        'barreira_3': 200
+        'barreira_1': 21,
+        'barreira_2': 60,
+        'barreira_3': 110
     },
     
     'DOGE/USDT': {
-        'barreira_1': 15,   # Memecoin volátil
-        'barreira_2': 40,
-        'barreira_3': 150
+        'barreira_1': 21,   # Memecoin volátil
+        'barreira_2': 50,
+        'barreira_3': 100
     },
     
     'LINK/USDT': {
         'barreira_1': 21,
         'barreira_2': 50,
-        'barreira_3': 200
+        'barreira_3': 100
     },
     
     'LTC/USDT': {
-        'barreira_1': 21,
-        'barreira_2': 50,
-        'barreira_3': 200
+        'barreira_1': 26,
+        'barreira_2': 60,
+        'barreira_3': 110
     },
     
     'DOT/USDT': {
-        'barreira_1': 20,
+        'barreira_1': 21,
         'barreira_2': 50,
-        'barreira_3': 200
+        'barreira_3': 100
     },
     
     'BCH/USDT': {
         'barreira_1': 21,
         'barreira_2': 50,
-        'barreira_3': 200
+        'barreira_3': 100
     },
     
     'AVAX/USDT': {
-        'barreira_1': 18,
-        'barreira_2': 45,
-        'barreira_3': 180
+        'barreira_1': 21,
+        'barreira_2': 50,
+        'barreira_3': 100
     },
     
     'ATOM/USDT': {
-        'barreira_1': 20,
+        'barreira_1': 21,
         'barreira_2': 50,
-        'barreira_3': 200
+        'barreira_3': 110
     },
     
     'ETC/USDT': {
-        'barreira_1': 21,
+        'barreira_1': 17,
         'barreira_2': 50,
-        'barreira_3': 200
+        'barreira_3': 110
     },
     
     'XLM/USDT': {
@@ -392,9 +392,9 @@ EMA_BARRIERS = {
     },
     
     'ENA/USDT': {
-        'barreira_1': 10,
-        'barreira_2': 30,
-        'barreira_3': 100
+        'barreira_1': 17,
+        'barreira_2': 49,
+        'barreira_3': 86
     },
     
     'FARTCOIN/USDT': {
