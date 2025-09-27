@@ -177,38 +177,38 @@ class SimplifiedCryptoAnalyzer:
                 in_overbought = k_curr > 80
                 in_neutral = 20 <= k_curr <= 80
                 
-                # Criar símbolo visual
+                # Criar símbolo visual - NÚMERO NA FRENTE
                 if in_oversold:
                     if k_cross_d_up:
-                        return f"⚡🚀 {k_curr:.1f}"  # SETUP PERFEITO compra
+                        return f"{k_curr:05.1f} ⚡🚀"  # SETUP PERFEITO compra
                     elif is_rising:
-                        return f"🟢📈 {k_curr:.1f}"  # Sobrevenda subindo
+                        return f"{k_curr:05.1f} 🟢📈"  # Sobrevenda subindo
                     elif is_falling:
-                        return f"🟢📉 {k_curr:.1f}"  # Sobrevenda descendo
+                        return f"{k_curr:05.1f} 🟢📉"  # Sobrevenda descendo
                     else:
-                        return f"🟢➡️ {k_curr:.1f}"   # Sobrevenda lateral
+                        return f"{k_curr:05.1f} 🟢➡️"   # Sobrevenda lateral
                         
                 elif in_overbought:
                     if k_cross_d_down:
-                        return f"💀💥 {k_curr:.1f}"  # SETUP PERFEITO venda
+                        return f"{k_curr:05.1f} 💀💥"  # SETUP PERFEITO venda
                     elif is_falling:
-                        return f"🔴📉 {k_curr:.1f}"  # Sobrecompra descendo
+                        return f"{k_curr:05.1f} 🔴📉"  # Sobrecompra descendo
                     elif is_rising:
-                        return f"🔴📈 {k_curr:.1f}"  # Sobrecompra subindo
+                        return f"{k_curr:05.1f} 🔴📈"  # Sobrecompra subindo
                     else:
-                        return f"🔴➡️ {k_curr:.1f}"   # Sobrecompra lateral
+                        return f"{k_curr:05.1f} 🔴➡️"   # Sobrecompra lateral
                         
                 else:  # Zona neutra
                     if k_cross_d_up:
-                        return f"🚀 {k_curr:.1f}"     # Cruzamento alta
+                        return f"{k_curr:05.1f} 🚀"     # Cruzamento alta
                     elif k_cross_d_down:
-                        return f"💥 {k_curr:.1f}"     # Cruzamento baixa
+                        return f"{k_curr:05.1f} 💥"     # Cruzamento baixa
                     elif is_rising:
-                        return f"📈 {k_curr:.1f}"     # Subindo
+                        return f"{k_curr:05.1f} 📈"     # Subindo
                     elif is_falling:
-                        return f"📉 {k_curr:.1f}"     # Descendo
+                        return f"{k_curr:05.1f} 📉"     # Descendo
                     else:
-                        return f"➡️ {k_curr:.1f}"      # Lateral
+                        return f"{k_curr:05.1f} ➡️"      # Lateral
             
             stoch_visual = analyze_stochastic(k_current, k_previous, d_current, d_previous)
             
@@ -244,23 +244,23 @@ class SimplifiedCryptoAnalyzer:
                 # Zona de breakout (próximo da média)
                 breakout_zone = abs(z_score) < 0.5 and abs(distance_pct) < 5
                 
-                # Estados visuais
+                # Estados visuais - NÚMERO NA FRENTE
                 if extreme_oversold and price < bb_lower:
-                    return f"🔥💚 {distance_pct:+.1f}%"  # EXTREME BUY - fundo perfeito
+                    return f"{distance_pct:+06.1f}% 🔥💚"  # EXTREME BUY - fundo perfeito
                 elif extreme_overbought and price > bb_upper:
-                    return f"🔥❤️ {distance_pct:+.1f}%"  # EXTREME SELL - topo perfeito
+                    return f"{distance_pct:+06.1f}% 🔥❤️"  # EXTREME SELL - topo perfeito
                 elif oversold_opportunity:
-                    return f"🟢📈 {distance_pct:+.1f}%"  # OVERSOLD - oportunidade compra
+                    return f"{distance_pct:+06.1f}% 🟢📈"  # OVERSOLD - oportunidade compra
                 elif overbought_opportunity:
-                    return f"🔴📉 {distance_pct:+.1f}%"  # OVERBOUGHT - oportunidade venda
+                    return f"{distance_pct:+06.1f}% 🔴📉"  # OVERBOUGHT - oportunidade venda
                 elif breakout_zone:
-                    return f"🔵⚡ {distance_pct:+.1f}%"   # BREAKOUT ZONE - usar EMAs
+                    return f"{distance_pct:+06.1f}% 🔵⚡"   # BREAKOUT ZONE - usar EMAs
                 else:
                     # Zona neutra com direção
                     if distance_pct > 0:
-                        return f"⚪↗️ {distance_pct:+.1f}%"  # Acima da média
+                        return f"{distance_pct:+06.1f}% ⚪↗️"  # Acima da média
                     else:
-                        return f"⚪↘️ {distance_pct:+.1f}%"  # Abaixo da média
+                        return f"{distance_pct:+06.1f}% ⚪↘️"  # Abaixo da média
             
             mean_reversion_signal = analyze_mean_reversion(
                 current_close, sma_20, z_score, distance_pct, rsi_14_current, bb_upper, bb_lower
@@ -419,11 +419,11 @@ def main():
     
     with col3:
         st.markdown("**Estocástico Direção:**")
-        st.markdown("• ⚡🚀 Setup PERFEITO compra")
-        st.markdown("• 💀💥 Setup PERFEITO venda")
-        st.markdown("• 🟢📈📉 Sobrevenda (↑↓)")
-        st.markdown("• 🔴📈📉 Sobrecompra (↑↓)")
-        st.markdown("• 🚀💥 Cruzamentos zona neutra")
+        st.markdown("• XX.X ⚡🚀 Setup PERFEITO compra")
+        st.markdown("• XX.X 💀💥 Setup PERFEITO venda")
+        st.markdown("• XX.X 🟢📈📉 Sobrevenda (↑↓)")
+        st.markdown("• XX.X 🔴📈📉 Sobrecompra (↑↓)")
+        st.markdown("• XX.X 🚀💥 Cruzamentos zona neutra")
 
     with col4:
         st.markdown("**Configurações EMA:**")
@@ -433,12 +433,12 @@ def main():
     
     with col5:
         st.markdown("**Mean Reversion:**")
-        st.markdown("• 🔥💚 EXTREME BUY (fundo)")
-        st.markdown("• 🔥❤️ EXTREME SELL (topo)")
-        st.markdown("• 🟢📈 Oversold (oportunidade)")
-        st.markdown("• 🔴📉 Overbought (oportunidade)")
-        st.markdown("• 🔵⚡ Breakout Zone (usar EMAs)")
-        st.markdown("• ⚪ Neutro (↗️↘️ direção)")
+        st.markdown("• +XX.X% 🔥💚 EXTREME BUY (fundo)")
+        st.markdown("• +XX.X% 🔥❤️ EXTREME SELL (topo)")
+        st.markdown("• +XX.X% 🟢📈 Oversold (oportunidade)")
+        st.markdown("• +XX.X% 🔴📉 Overbought (oportunidade)")
+        st.markdown("• +XX.X% 🔵⚡ Breakout Zone (usar EMAs)")
+        st.markdown("• +XX.X% ⚪ Neutro (↗️↘️ direção)")
     
     st.markdown("---")
     
@@ -558,17 +558,17 @@ def main():
 **% Negativa**: Preço abaixo da EMA (distância em %)
 
 **Stochastic Direção:**
-⚡🚀 **Setup PERFEITO Compra**: StochRSI cruzou na sobrevenda
-💀💥 **Setup PERFEITO Venda**: StochRSI cruzou na sobrecompra  
-🟢📈📉 **Sobrevenda**: <20, subindo/descendo (oportunidade)
-🔴📈📉 **Sobrecompra**: >80, subindo/descendo (cuidado)
+XX.X ⚡🚀 **Setup PERFEITO Compra**: StochRSI cruzou na sobrevenda
+XX.X 💀💥 **Setup PERFEITO Venda**: StochRSI cruzou na sobrecompra  
+XX.X 🟢📈📉 **Sobrevenda**: <20, subindo/descendo (oportunidade)
+XX.X 🔴📈📉 **Sobrecompra**: >80, subindo/descendo (cuidado)
 
 **Mean Reversion:**
-🔥💚 **EXTREME BUY**: Fundo matemático perfeito (Z-Score < -2.0 + RSI < 25)
-🔥❤️ **EXTREME SELL**: Topo matemático perfeito (Z-Score > 2.0 + RSI > 75)
-🟢📈 **Oversold**: Oportunidade de compra (distância > -10% da média)
-🔴📉 **Overbought**: Oportunidade de venda (distância > +10% da média)
-🔵⚡ **Breakout Zone**: Use estratégia EMA (próximo da média ±5%)
++XX.X% 🔥💚 **EXTREME BUY**: Fundo matemático perfeito (Z-Score < -2.0 + RSI < 25)
++XX.X% 🔥❤️ **EXTREME SELL**: Topo matemático perfeito (Z-Score > 2.0 + RSI > 75)
++XX.X% 🟢📈 **Oversold**: Oportunidade de compra (distância > -10% da média)
++XX.X% 🔴📉 **Overbought**: Oportunidade de venda (distância > +10% da média)
++XX.X% 🔵⚡ **Breakout Zone**: Use estratégia EMA (próximo da média ±5%)
 
 **Estratégias Combinadas:**
 • **🔥 Extremes** = Mean Reversion (maior probabilidade)
