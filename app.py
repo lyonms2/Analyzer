@@ -50,7 +50,7 @@ def fetch_kucoin_data(symbol, candles=200):
         if data['code'] == '200000' and data['data']:
             df = pd.DataFrame(data['data'], columns=['time', 'open', 'close', 'high', 'low', 'volume', 'turnover'])
             df = df.astype({'open': float, 'close': float, 'high': float, 'low': float, 'volume': float})
-            df['time'] = pd.to_datetime(df['time'], unit='s')
+            df['time'] = pd.to_datetime(df['time'].astype(int), unit='s')
             df = df.sort_values('time').reset_index(drop=True)
             return df.tail(candles)
     except Exception as e:
