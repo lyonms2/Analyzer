@@ -16,9 +16,9 @@ st.set_page_config(
 
 # Lista de tokens
 TOKENS = [
-    'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'DOGE/USDT', 'AVAX/USDT',
-    'LINK/USDT', 'PEPE/USDT', 'ADA/USDT', 'NEAR/USDT', 'INJ/USDT', 'WIF/USDT',
-    'BONK/USDT', 'UNI/USDT'
+    'BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'DOGE-USDT', 'AVAX-USDT',
+    'LINK-USDT', 'PEPE-USDT', 'ADA-USDT', 'NEAR-USDT', 'INJ-USDT', 'WIF-USDT',
+    'BONK-USDT', 'UNI-USDT'
 ]
 
 # Funções de cálculo
