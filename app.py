@@ -73,6 +73,17 @@ def is_price_near_ema(price: float, ema_value: float, tolerance_percent: float =
     diff_percent = abs(price - ema_value) / ema_value * 100
     return diff_percent <= tolerance_percent
 
+def send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool:
+    try:
+        if not bot_token or not chat_id:
+            return False
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": text}
+        resp = requests.post(url, json=payload, timeout=10)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
 def analyze_signal(ha_df, ema20, ema50):
     if len(ha_df) < 2:
         return "Sem dados suficientes", "none", False, "-", "-", "-"
@@ -146,6 +157,7 @@ def process_token(symbol):
         'cross': cross_label,
         'price_cross_ema20': price_cross_ema20,
         'price_cross_ema50': price_cross_ema50,
+        'last_candle_time': str(last_row['time']),
         'data': ha_df
     }
 
@@ -158,8 +170,15 @@ def show_kucoin_page():
     st.markdown("**Estratégia:** Heikin Ashi + EMAs (15min) - **Horário de Brasília**")
 
     st.sidebar.header("⚙️ Configurações")
+    st.sidebar.subheader("Alertas e Monitoramento")
+    enable_monitor = st.sidebar.checkbox("Ativar monitoramento automático (15 min)", value=False)
+    bot_token = st.sidebar.text_input("Telegram Bot Token", type="password")
+    chat_id = st.sidebar.text_input("Telegram Chat ID")
+    send_on_near = st.sidebar.checkbox("Alertar quando preço próximo das EMAs", value=True)
+    send_on_price_cross = st.sidebar.checkbox("Alertar cruzamento Preço x EMAs", value=True)
+    send_on_ema_cross = st.sidebar.checkbox("Alertar cruzamento EMA20 x EMA50", value=True)
 
-    if st.sidebar.button("🔄 Atualizar Todos os Dados", type="primary"):
+    if st.sidebar.button("🔄 Atualizar Todos os Dados", type="primary") or enable_monitor:
         with st.spinner("Buscando dados dos tokens... Isso pode levar alguns minutos..."):
             results = []
             progress_bar = st.progress(0)
@@ -175,8 +194,50 @@ def show_kucoin_page():
             st.session_state['last_update'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             st.success(f"✅ Análise concluída! {len(results)} tokens processados.")
 
+            # Envio de alertas Telegram com deduplicação por candle
+            if enable_monitor and results:
+                if 'last_alerts' not in st.session_state:
+                    st.session_state['last_alerts'] = {}
+                for item in results:
+                    token_name = item['token']
+                    candle_time = item.get('last_candle_time', '')
+                    last_sent_for_token = st.session_state['last_alerts'].get(token_name)
+                    should_send = last_sent_for_token != candle_time
+
+                    messages = []
+                    if send_on_near and item['status'].startswith("📍 Próximo"):
+                        messages.append(f"{token_name}: {item['status']}")
+                    if send_on_price_cross and (item.get('price_cross_ema20') not in (None, '-') or item.get('price_cross_ema50') not in (None, '-')):
+                        if item.get('price_cross_ema20') and item['price_cross_ema20'] != '-':
+                            messages.append(f"{token_name}: {item['price_cross_ema20']}")
+                        if item.get('price_cross_ema50') and item['price_cross_ema50'] != '-':
+                            messages.append(f"{token_name}: {item['price_cross_ema50']}")
+                    if send_on_ema_cross and item.get('cross') not in (None, '-'):
+                        messages.append(f"{token_name}: {item['cross']}")
+
+                    if should_send and messages and bot_token and chat_id:
+                        text = "\n".join(messages)
+                        ok = send_telegram_message(bot_token, chat_id, text)
+                        if ok:
+                            st.session_state['last_alerts'][token_name] = candle_time
+                if bot_token and chat_id:
+                    st.sidebar.success("Alertas do ciclo enviados (se houve sinais novos).")
+                else:
+                    st.sidebar.info("Informe Bot Token e Chat ID para enviar alertas.")
+
     if 'last_update' in st.session_state:
         st.sidebar.info(f"🕒 Última atualização: {st.session_state['last_update']}")
+
+    # Auto refresh via JavaScript a cada 15 minutos quando monitoramento ativo
+    if enable_monitor:
+        st.markdown(
+            """
+            <script>
+            setTimeout(function(){ window.location.reload(); }, 900000);
+            </script>
+            """,
+            unsafe_allow_html=True,
+        )
 
     if 'analysis_data' in st.session_state and st.session_state['analysis_data']:
         st.header("📊 Resultados da Análise")
