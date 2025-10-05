@@ -13,8 +13,7 @@ from analysis_tab import show_analysis_page  # nova página de análise
 
 TOKENS = [
     'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'DOGE/USDT', 'AVAX/USDT',
-    'LINK/USDT', 'PEPE/USDT', 'ADA/USDT', 'NEAR/USDT', 'INJ/USDT', 'WIF/USDT',
-    'BONK/USDT', 'UNI/USDT'
+    'LINK/USDT', 'ADA/USDT', 'NEAR/USDT', 'INJ/USDT', 'WIF/USDT', 'UNI/USDT'
 ]
 
 def fetch_kucoin_data(symbol, candles=200):
@@ -22,12 +21,12 @@ def fetch_kucoin_data(symbol, candles=200):
     try:
         symbol = symbol.replace('/', '-')  # correção do formato
         end_time = int(time.time())
-        # 15min candles => 900 segundos por candle
-        start_time = end_time - (candles * 900)
+        # 3min candles => 180 segundos por candle
+        start_time = end_time - (candles * 180)
 
         url = "https://api.kucoin.com/api/v1/market/candles"
         params = {
-            'type': '15min',
+            'type': '3min',
             'symbol': symbol,
             'startAt': start_time,
             'endAt': end_time
@@ -167,11 +166,11 @@ def process_token(symbol):
 
 def show_kucoin_page():
     st.title("📈 Analisador de Criptomoedas - KuCoin")
-    st.markdown("**Estratégia:** Heikin Ashi + EMAs (15min) - **Horário de Brasília**")
+    st.markdown("**Estratégia:** Heikin Ashi + EMAs (3min) - **Horário de Brasília**")
 
     st.sidebar.header("⚙️ Configurações")
     st.sidebar.subheader("Alertas e Monitoramento")
-    enable_monitor = st.sidebar.checkbox("Ativar monitoramento automático (15 min)", value=False)
+    enable_monitor = st.sidebar.checkbox("Ativar monitoramento automático (3 min)", value=False)
     bot_token = st.sidebar.text_input("Telegram Bot Token", type="password")
     chat_id = st.sidebar.text_input("Telegram Chat ID")
     send_on_near = st.sidebar.checkbox("Alertar quando preço próximo das EMAs", value=True)
@@ -228,12 +227,12 @@ def show_kucoin_page():
     if 'last_update' in st.session_state:
         st.sidebar.info(f"🕒 Última atualização: {st.session_state['last_update']}")
 
-    # Auto refresh via JavaScript a cada 15 minutos quando monitoramento ativo
+    # Auto refresh via JavaScript a cada 3 minutos quando monitoramento ativo
     if enable_monitor:
         st.markdown(
             """
             <script>
-            setTimeout(function(){ window.location.reload(); }, 900000);
+            setTimeout(function(){ window.location.reload(); }, 180000);
             </script>
             """,
             unsafe_allow_html=True,
