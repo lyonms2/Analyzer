@@ -67,7 +67,7 @@ def calculate_heikin_ashi(df):
 def calculate_ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
-def is_price_near_ema(price: float, ema_value: float, tolerance_percent: float = 0.5) -> bool:
+def is_price_near_ema(price: float, ema_value: float, tolerance_percent: float = 0.1) -> bool:
     if pd.isna(ema_value) or pd.isna(price):
         return False
     diff_percent = abs(price - ema_value) / ema_value * 100
