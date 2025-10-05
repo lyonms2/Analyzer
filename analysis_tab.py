@@ -80,23 +80,25 @@ def show_analysis_page():
     col5.metric("Total closedPnl (arquivo inteiro)", f"{total_closedpnl_arquivo:.4f}")
     col6.metric("Total closedPnl (apenas Close)", f"{total_closedpnl_fechados:.4f}")
 
-    # PnL acumulado (líquido e bruto)
-    df_close["PnL_Acumulado_Liquido"] = df_close["closedPnl"].cumsum()
-    df_close["PnL_Acumulado_Bruto"] = df_close["pnl_bruto"].cumsum()
+    # PnL acumulado (líquido: arquivo inteiro; bruto: apenas Close)
+    df_liq = df.dropna(subset=["closedPnl", "time"]).sort_values("time").copy()
+    df_liq["PnL_Acumulado_Liquido"] = df_liq["closedPnl"].cumsum()
+    df_close_sorted = df_close.sort_values("time").copy()
+    df_close_sorted["PnL_Acumulado_Bruto"] = df_close_sorted["pnl_bruto"].cumsum()
 
     fig_pnl = go.Figure()
-    # Linha principal: Líquido
+    # Linha principal: Líquido (todas as linhas do arquivo)
     fig_pnl.add_trace(go.Scatter(
-        x=df_close["time"],
-        y=df_close["PnL_Acumulado_Liquido"],
+        x=df_liq["time"],
+        y=df_liq["PnL_Acumulado_Liquido"],
         mode="lines+markers",
         name="PnL Líquido (Acumulado)",
         line=dict(color="cyan", width=3)
     ))
-    # Linha secundária: Bruto
+    # Linha secundária: Bruto (apenas fechamentos)
     fig_pnl.add_trace(go.Scatter(
-        x=df_close["time"],
-        y=df_close["PnL_Acumulado_Bruto"],
+        x=df_close_sorted["time"],
+        y=df_close_sorted["PnL_Acumulado_Bruto"],
         mode="lines",
         name="PnL Bruto (Acumulado)",
         line=dict(color="lightgray", width=2, dash="dash")
