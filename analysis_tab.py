@@ -11,17 +11,21 @@ def show_analysis_page():
     # Upload opcional
     uploaded_file = st.file_uploader("📁 Envie um arquivo CSV de histórico de trades", type=["csv"])
     if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
+        # Inferir delimitador e aceitar decimal com vírgula
+        df = pd.read_csv(uploaded_file, sep=None, engine="python")
     else:
         try:
-            df = pd.read_csv("trade_history.csv")
+            df = pd.read_csv("trade_history.csv", sep=None, engine="python")
         except FileNotFoundError:
             st.warning("⚠️ Nenhum arquivo 'trade_history.csv' encontrado no diretório.")
             st.stop()
 
     # Conversões
-    df["closedPnl"] = pd.to_numeric(df["closedPnl"], errors="coerce")
-    df["fee"] = pd.to_numeric(df["fee"], errors="coerce")
+    # Normalizar decimais com vírgula e converter para número
+    if "closedPnl" in df.columns:
+        df["closedPnl"] = pd.to_numeric(df["closedPnl"].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+    if "fee" in df.columns:
+        df["fee"] = pd.to_numeric(df["fee"].astype(str).str.replace(",", ".", regex=False), errors="coerce")
     df["time"] = pd.to_datetime(df["time"], errors="coerce", format="%d/%m/%Y - %H:%M:%S")
 
     # Separar aberturas e fechamentos
@@ -59,8 +63,9 @@ def show_analysis_page():
     erros = (df_close["resultado"] == "Erro").sum()
     taxa_acerto = (acertos / (acertos + erros) * 100) if (acertos + erros) > 0 else 0
 
-    pnl_bruto_total = df_close["closedPnl"].sum()
-    pnl_liquido_total = df_close["closedPnl"].sum()
+    # Totais solicitados
+    total_closedpnl_arquivo = df["closedPnl"].sum()
+    total_closedpnl_fechados = df_close["closedPnl"].sum()
 
     lucro_medio = df_close.loc[df_close["closedPnl"] > 0, "closedPnl"].mean()
     perda_media = df_close.loc[df_close["closedPnl"] < 0, "closedPnl"].mean()
@@ -72,8 +77,8 @@ def show_analysis_page():
     col2.metric("Acertos", acertos)
     col3.metric("Erros", erros)
     col4.metric("Taxa de Acerto", f"{taxa_acerto:.2f}%")
-    col5.metric("PnL Bruto (sem taxas)", f"{pnl_bruto_total:.4f}")
-    col6.metric("PnL Líquido (com taxas)", f"{pnl_liquido_total:.4f}")
+    col5.metric("Total closedPnl (arquivo inteiro)", f"{total_closedpnl_arquivo:.4f}")
+    col6.metric("Total closedPnl (apenas Close)", f"{total_closedpnl_fechados:.4f}")
 
     # PnL acumulado
     df_close["PnL_Acumulado"] = df_close["closedPnl"].cumsum()
