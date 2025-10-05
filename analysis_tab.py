@@ -1,274 +1,181 @@
+# analysis_tab.py
 import streamlit as st
-from datetime import datetime
-import time
 import pandas as pd
-import numpy as np
-import requests
 import plotly.graph_objects as go
-from analysis_tab import show_analysis_page  # nova página de análise
+import plotly.express as px
 
-# =========================
-# FUNÇÕES DO ANALISADOR KUCOIN
-# =========================
+def show_analysis_page():
+    st.title("📊 Análise de Resultados de Trades")
+    st.markdown("Análise baseada apenas nos trades **fechados** (`Close Long` e `Close Short`), com PnL bruto e líquido calculados.")
 
-TOKENS = [
-    'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'DOGE/USDT', 'AVAX/USDT',
-    'LINK/USDT', 'ADA/USDT', 'NEAR/USDT', 'INJ/USDT', 'WIF/USDT', 'UNI/USDT'
-]
+    # Upload opcional
+    uploaded_file = st.file_uploader("📁 Envie um arquivo CSV de histórico de trades", type=["csv"])
+    if uploaded_file is not None:
+        # Inferir delimitador e aceitar decimal com vírgula
+        df = pd.read_csv(uploaded_file, sep=None, engine="python")
+    else:
+        try:
+            df = pd.read_csv("trade_history.csv", sep=None, engine="python")
+        except FileNotFoundError:
+            st.warning("⚠️ Nenhum arquivo 'trade_history.csv' encontrado no diretório.")
+            st.stop()
 
-def fetch_kucoin_data(symbol, candles=200):
-    """Busca dados da KuCoin"""
-    try:
-        symbol = symbol.replace('/', '-')  # correção do formato
-        end_time = int(time.time())
-        # 3min candles => 180 segundos por candle
-        start_time = end_time - (candles * 180)
+    # Conversões
+    # Normalizar decimais com vírgula e converter para número
+    if "closedPnl" in df.columns:
+        df["closedPnl"] = pd.to_numeric(df["closedPnl"].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+    if "fee" in df.columns:
+        df["fee"] = pd.to_numeric(df["fee"].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+    df["time"] = pd.to_datetime(df["time"], errors="coerce", format="%d/%m/%Y - %H:%M:%S")
 
-        url = "https://api.kucoin.com/api/v1/market/candles"
-        params = {
-            'type': '3min',
-            'symbol': symbol,
-            'startAt': start_time,
-            'endAt': end_time
-        }
+    # Separar aberturas e fechamentos
+    df_open = df[df["dir"].isin(["Open Long", "Open Short"])].copy()
+    df_close = df[df["dir"].isin(["Close Long", "Close Short"])].copy()
 
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
+    if df_close.empty:
+        st.error("❌ Nenhum trade fechado encontrado (Close Long / Close Short).")
+        st.stop()
 
-        if data['code'] == '200000' and data['data']:
-            df = pd.DataFrame(data['data'], columns=['time', 'open', 'close', 'high', 'low', 'volume', 'turnover'])
-            df = df.astype({'open': float, 'close': float, 'high': float, 'low': float, 'volume': float})
-
-            df['time'] = pd.to_datetime(df['time'].astype(float), unit='s')
-            df['time'] = df['time'].dt.tz_localize('UTC').dt.tz_convert('America/Sao_Paulo')
-
-            df = df.sort_values('time').reset_index(drop=True)
-            return df.tail(candles)
-    except Exception as e:
-        st.error(f"Erro ao buscar {symbol}: {str(e)}")
-    return None
-
-def calculate_heikin_ashi(df):
-    ha_df = df.copy()
-    ha_df['ha_close'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
-    ha_df['ha_open'] = 0.0
-
-    for i in range(len(df)):
-        if i == 0:
-            ha_df.loc[i, 'ha_open'] = (df.loc[i, 'open'] + df.loc[i, 'close']) / 2
+    # Vincular taxa do Open mais próximo anterior ao Close da mesma coin e direção (opcional)
+    df_close["open_fee"] = 0.0
+    for idx, row in df_close.iterrows():
+        same_coin = df_open[df_open["coin"] == row["coin"]]
+        if "Long" in row["dir"]:
+            same_coin = same_coin[same_coin["dir"] == "Open Long"]
         else:
-            ha_df.loc[i, 'ha_open'] = (ha_df.loc[i-1, 'ha_open'] + ha_df.loc[i-1, 'ha_close']) / 2
+            same_coin = same_coin[same_coin["dir"] == "Open Short"]
 
-    ha_df['ha_high'] = ha_df[['high', 'ha_open', 'ha_close']].max(axis=1)
-    ha_df['ha_low'] = ha_df[['low', 'ha_open', 'ha_close']].min(axis=1)
-    return ha_df
+        same_coin = same_coin[same_coin["time"] <= row["time"]]
+        if not same_coin.empty:
+            last_open = same_coin.iloc[-1]
+            df_close.at[idx, "open_fee"] = last_open["fee"]
 
-def calculate_ema(series, period):
-    return series.ewm(span=period, adjust=False).mean()
+    # Calcular PnL: considerar apenas closedPnl conforme solicitado
+    df_close["pnl_bruto"] = df_close["closedPnl"].fillna(0)
+    df_close["pnl_liquido"] = df_close["closedPnl"].fillna(0)
 
-def is_price_near_ema(price: float, ema_value: float, tolerance_percent: float = 0.1) -> bool:
-    if pd.isna(ema_value) or pd.isna(price):
-        return False
-    diff_percent = abs(price - ema_value) / ema_value * 100
-    return diff_percent <= tolerance_percent
+    # Classificar resultado (com base em closedPnl)
+    df_close["resultado"] = df_close["closedPnl"].apply(lambda x: "Acerto" if x > 0 else ("Erro" if x < 0 else "Neutro"))
 
-def send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool:
-    try:
-        if not bot_token or not chat_id:
-            return False
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": text}
-        resp = requests.post(url, json=payload, timeout=10)
-        return resp.status_code == 200
-    except Exception:
-        return False
+    # Estatísticas
+    total_trades = len(df_close)
+    acertos = (df_close["resultado"] == "Acerto").sum()
+    erros = (df_close["resultado"] == "Erro").sum()
+    taxa_acerto = (acertos / (acertos + erros) * 100) if (acertos + erros) > 0 else 0
 
-def analyze_signal(ha_df, ema20, ema50):
-    if len(ha_df) < 2:
-        return "Sem dados suficientes", "none", False, "-", "-", "-"
+    # Totais solicitados
+    total_closedpnl_arquivo = df["closedPnl"].sum()
+    total_closedpnl_fechados = df_close["closedPnl"].sum()
 
-    current_idx = len(ha_df) - 1
-    prev_idx = current_idx - 1
-    current_price = ha_df.loc[current_idx, 'ha_close']
-    prev_high = ha_df.loc[prev_idx, 'ha_high']
-    prev_low = ha_df.loc[prev_idx, 'ha_low']
-    current_close = ha_df.loc[current_idx, 'ha_close']
-    current_ema20 = ema20.iloc[current_idx]
-    current_ema50 = ema50.iloc[current_idx]
-    prev_ema20 = ema20.iloc[prev_idx]
-    prev_ema50 = ema50.iloc[prev_idx]
-    prev_price = ha_df.loc[prev_idx, 'ha_close']
+    lucro_medio = df_close.loc[df_close["closedPnl"] > 0, "closedPnl"].mean()
+    perda_media = df_close.loc[df_close["closedPnl"] < 0, "closedPnl"].mean()
 
-    cross_label = "-"
-    if not pd.isna(prev_ema20) and not pd.isna(prev_ema50) and not pd.isna(current_ema20) and not pd.isna(current_ema50):
-        crossed_up = prev_ema20 <= prev_ema50 and current_ema20 > current_ema50
-        crossed_down = prev_ema20 >= prev_ema50 and current_ema20 < current_ema50
-        if crossed_up:
-            cross_label = "Cruzou para cima (EMA20 > EMA50)"
-        elif crossed_down:
-            cross_label = "Cruzou para baixo (EMA20 < EMA50)"
+    # Métricas principais
+    st.markdown("### 💹 Resultados Gerais")
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1.metric("Total de Trades Fechados", total_trades)
+    col2.metric("Acertos", acertos)
+    col3.metric("Erros", erros)
+    col4.metric("Taxa de Acerto", f"{taxa_acerto:.2f}%")
+    col5.metric("Total closedPnl (arquivo inteiro)", f"{total_closedpnl_arquivo:.4f}")
+    col6.metric("Total closedPnl (apenas Close)", f"{total_closedpnl_fechados:.4f}")
 
-    # Cruzamento do preço com as EMAs
-    price_cross_ema20 = "-"
-    price_cross_ema50 = "-"
-    if not pd.isna(prev_price) and not pd.isna(current_price) and not pd.isna(prev_ema20) and not pd.isna(current_ema20):
-        if prev_price <= prev_ema20 and current_price > current_ema20:
-            price_cross_ema20 = "Preço cruzou acima da EMA20"
-        elif prev_price >= prev_ema20 and current_price < current_ema20:
-            price_cross_ema20 = "Preço cruzou abaixo da EMA20"
-    if not pd.isna(prev_price) and not pd.isna(current_price) and not pd.isna(prev_ema50) and not pd.isna(current_ema50):
-        if prev_price <= prev_ema50 and current_price > current_ema50:
-            price_cross_ema50 = "Preço cruzou acima da EMA50"
-        elif prev_price >= prev_ema50 and current_price < current_ema50:
-            price_cross_ema50 = "Preço cruzou abaixo da EMA50"
+    # PnL acumulado (líquido: arquivo inteiro; bruto: apenas Close)
+    df_liq = df.dropna(subset=["closedPnl", "time"]).sort_values("time").copy()
+    df_liq["PnL_Acumulado_Liquido"] = df_liq["closedPnl"].cumsum()
+    df_close_sorted = df_close.sort_values("time").copy()
+    df_close_sorted["PnL_Acumulado_Bruto"] = df_close_sorted["pnl_bruto"].cumsum()
 
-    near_ema20 = is_price_near_ema(current_price, current_ema20)
-    near_ema50 = is_price_near_ema(current_price, current_ema50)
+    fig_pnl = go.Figure()
+    # Linha principal: Líquido (todas as linhas do arquivo)
+    fig_pnl.add_trace(go.Scatter(
+        x=df_liq["time"],
+        y=df_liq["PnL_Acumulado_Liquido"],
+        mode="lines+markers",
+        name="PnL Líquido (Acumulado)",
+        line=dict(color="cyan", width=3)
+    ))
+    # Linha secundária: Bruto (apenas fechamentos)
+    fig_pnl.add_trace(go.Scatter(
+        x=df_close_sorted["time"],
+        y=df_close_sorted["PnL_Acumulado_Bruto"],
+        mode="lines",
+        name="PnL Bruto (Acumulado)",
+        line=dict(color="lightgray", width=2, dash="dash")
+    ))
 
-    if near_ema20 and near_ema50:
-        return "📍 Próximo de EMA20 e EMA50", "near-both", True, cross_label, price_cross_ema20, price_cross_ema50
-    if near_ema50:
-        return "📍 Próximo de EMA50", "near-ema50", True, cross_label, price_cross_ema20, price_cross_ema50
-    if near_ema20:
-        return "📍 Próximo de EMA20", "near-ema20", True, cross_label, price_cross_ema20, price_cross_ema50
-    return "➖ Longe das EMAs", "none", False, cross_label, price_cross_ema20, price_cross_ema50
-
-def process_token(symbol):
-    df = fetch_kucoin_data(symbol)
-    if df is None or len(df) < 50:
-        return None
-
-    ha_df = calculate_heikin_ashi(df)
-    ha_df['ema20'] = calculate_ema(ha_df['ha_close'], 20)
-    ha_df['ema50'] = calculate_ema(ha_df['ha_close'], 50)
-    status, signal_type, confirmed, cross_label, price_cross_ema20, price_cross_ema50 = analyze_signal(
-        ha_df, ha_df['ema20'], ha_df['ema50']
+    fig_pnl.update_layout(
+        title="💰 Evolução do PnL Acumulado",
+        xaxis_title="Data/Hora",
+        yaxis_title="PnL (USDT)",
+        template="plotly_dark",
+        height=400,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-    last_row = ha_df.iloc[-1]
-    return {
-        'token': symbol.replace('-', '/'),
-        'price': f"{last_row['ha_close']:.8f}",
-        'ema20': f"{last_row['ema20']:.8f}",
-        'ema50': f"{last_row['ema50']:.8f}",
-        'status': status,
-        'signal_type': signal_type,
-        'confirmed': confirmed,
-        'cross': cross_label,
-        'price_cross_ema20': price_cross_ema20,
-        'price_cross_ema50': price_cross_ema50,
-        'last_candle_time': str(last_row['time']),
-        'data': ha_df
-    }
+    st.plotly_chart(fig_pnl, use_container_width=True)
 
-# =========================
-# INTERFACE KUCOIN
-# =========================
-
-def show_kucoin_page():
-    st.title("📈 Analisador de Criptomoedas - KuCoin")
-    st.markdown("**Estratégia:** Heikin Ashi + EMAs (3min) - **Horário de Brasília**")
-
-    st.sidebar.header("⚙️ Configurações")
-    st.sidebar.subheader("Alertas e Monitoramento")
-    enable_monitor = st.sidebar.checkbox("Ativar monitoramento automático (3 min)", value=False)
-    bot_token = st.sidebar.text_input("Telegram Bot Token", type="password")
-    chat_id = st.sidebar.text_input("Telegram Chat ID")
-    send_on_near = st.sidebar.checkbox("Alertar quando preço próximo das EMAs", value=True)
-    send_on_price_cross = st.sidebar.checkbox("Alertar cruzamento Preço x EMAs", value=True)
-    send_on_ema_cross = st.sidebar.checkbox("Alertar cruzamento EMA20 x EMA50", value=True)
-
-    if st.sidebar.button("🔄 Atualizar Todos os Dados", type="primary") or enable_monitor:
-        with st.spinner("Buscando dados dos tokens... Isso pode levar alguns minutos..."):
-            results = []
-            progress_bar = st.progress(0)
-            for idx, token in enumerate(TOKENS):
-                token_data = process_token(token)
-                if token_data:
-                    results.append(token_data)
-                progress_bar.progress((idx + 1) / len(TOKENS))
-                time.sleep(0.5)
-
-            results.sort(key=lambda x: x['signal_type'])
-            st.session_state['analysis_data'] = results
-            st.session_state['last_update'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            st.success(f"✅ Análise concluída! {len(results)} tokens processados.")
-
-            # Envio de alertas Telegram com deduplicação por candle
-            if enable_monitor and results:
-                if 'last_alerts' not in st.session_state:
-                    st.session_state['last_alerts'] = {}
-                for item in results:
-                    token_name = item['token']
-                    candle_time = item.get('last_candle_time', '')
-                    last_sent_for_token = st.session_state['last_alerts'].get(token_name)
-                    should_send = last_sent_for_token != candle_time
-
-                    messages = []
-                    if send_on_near and item['status'].startswith("📍 Próximo"):
-                        messages.append(f"{token_name}: {item['status']}")
-                    if send_on_price_cross and (item.get('price_cross_ema20') not in (None, '-') or item.get('price_cross_ema50') not in (None, '-')):
-                        if item.get('price_cross_ema20') and item['price_cross_ema20'] != '-':
-                            messages.append(f"{token_name}: {item['price_cross_ema20']}")
-                        if item.get('price_cross_ema50') and item['price_cross_ema50'] != '-':
-                            messages.append(f"{token_name}: {item['price_cross_ema50']}")
-                    if send_on_ema_cross and item.get('cross') not in (None, '-'):
-                        messages.append(f"{token_name}: {item['cross']}")
-
-                    if should_send and messages and bot_token and chat_id:
-                        text = "\n".join(messages)
-                        ok = send_telegram_message(bot_token, chat_id, text)
-                        if ok:
-                            st.session_state['last_alerts'][token_name] = candle_time
-                if bot_token and chat_id:
-                    st.sidebar.success("Alertas do ciclo enviados (se houve sinais novos).")
-                else:
-                    st.sidebar.info("Informe Bot Token e Chat ID para enviar alertas.")
-
-    if 'last_update' in st.session_state:
-        st.sidebar.info(f"🕒 Última atualização: {st.session_state['last_update']}")
-
-    # Auto refresh via JavaScript a cada 3 minutos quando monitoramento ativo
-    if enable_monitor:
-        st.markdown(
-            """
-            <script>
-            setTimeout(function(){ window.location.reload(); }, 180000);
-            </script>
-            """,
-            unsafe_allow_html=True,
+    # ========================
+    # 🪙 Desempenho por Moeda
+    # ========================
+    st.markdown("### 🪙 Desempenho por Moeda")
+    coin_stats = (
+        df_close.groupby("coin")
+        .agg(
+            total_trades=("closedPnl", "count"),
+            acertos=("closedPnl", lambda x: (x > 0).sum()),
+            erros=("closedPnl", lambda x: (x < 0).sum()),
+            taxa_acerto=("closedPnl", lambda x: (x > 0).sum() / len(x) * 100),
+            pnl_bruto=("closedPnl", "sum"),
+            pnl_liquido=("closedPnl", "sum")
         )
+        .sort_values("taxa_acerto", ascending=False)
+        .reset_index()
+    )
+    st.dataframe(coin_stats, use_container_width=True)
 
-    if 'analysis_data' in st.session_state and st.session_state['analysis_data']:
-        st.header("📊 Resultados da Análise")
+    fig_coin = px.bar(
+        coin_stats,
+        x="coin",
+        y="taxa_acerto",
+        text_auto=".2f",
+        title="🎯 Taxa de Acerto por Moeda",
+        color="taxa_acerto",
+        color_continuous_scale="Tealgrn"
+    )
+    fig_coin.update_layout(template="plotly_dark", height=400)
+    st.plotly_chart(fig_coin, use_container_width=True)
 
-        df_table = pd.DataFrame([{
-            'Token': item['token'],
-            'Preço': item['price'],
-            'EMA 20': item['ema20'],
-            'EMA 50': item['ema50'],
-            'Preço x EMA20': item.get('price_cross_ema20', '-'),
-            'Preço x EMA50': item.get('price_cross_ema50', '-'),
-            'Cruzamento': item.get('cross', '-'),
-            'Status': item['status']
-        } for item in st.session_state['analysis_data']])
+    # ========================
+    # ⏰ Desempenho por Hora
+    # ========================
+    st.markdown("### ⏰ Desempenho por Hora do Dia")
+    df_close["hora"] = df_close["time"].dt.hour
+    hora_stats = (
+        df_close.groupby("hora")
+        .agg(
+            total_trades=("closedPnl", "count"),
+            acertos=("closedPnl", lambda x: (x > 0).sum()),
+            erros=("closedPnl", lambda x: (x < 0).sum()),
+            taxa_acerto=("closedPnl", lambda x: (x > 0).sum() / len(x) * 100),
+            pnl_bruto=("closedPnl", "sum"),
+            pnl_liquido=("closedPnl", "sum")
+        )
+        .reset_index()
+    )
+    fig_hora = px.bar(
+        hora_stats,
+        x="hora",
+        y="taxa_acerto",
+        text_auto=".1f",
+        title="🕒 Taxa de Acerto por Hora do Dia",
+        color="taxa_acerto",
+        color_continuous_scale="Viridis"
+    )
+    fig_hora.update_layout(template="plotly_dark", height=400)
+    st.plotly_chart(fig_hora, use_container_width=True)
 
-        st.dataframe(df_table, use_container_width=True, height=600)
-    else:
-        st.info("👆 Clique em 'Atualizar Todos os Dados' na barra lateral para começar a análise!")
-
-# =========================
-# MENU PRINCIPAL
-# =========================
-
-def main():
-    st.sidebar.title("🧭 Navegação")
-    page = st.sidebar.radio("Escolha uma página:", ["Analisador KuCoin", "Análise de Resultados"])
-
-    if page == "Analisador KuCoin":
-        show_kucoin_page()
-    else:
-        show_analysis_page()
-
-if __name__ == "__main__":
-    st.set_page_config(page_title="Analisador Cripto KuCoin", page_icon="📈", layout="wide")
-    main()
+    # ========================
+    # 📋 Tabela Detalhada
+    # ========================
+    with st.expander("📋 Ver tabela completa de trades fechados"):
+        st.dataframe(df_close, use_container_width=True, height=600)
