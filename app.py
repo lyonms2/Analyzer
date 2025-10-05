@@ -50,7 +50,11 @@ def fetch_kucoin_data(symbol, candles=200):
         if data['code'] == '200000' and data['data']:
             df = pd.DataFrame(data['data'], columns=['time', 'open', 'close', 'high', 'low', 'volume', 'turnover'])
             df = df.astype({'open': float, 'close': float, 'high': float, 'low': float, 'volume': float})
+            
+            # Converter timestamp para datetime e ajustar para fuso horário do Brasil
             df['time'] = pd.to_datetime(df['time'].astype(int), unit='s')
+            df['time'] = df['time'].dt.tz_localize('UTC').dt.tz_convert('America/Sao_Paulo')
+            
             df = df.sort_values('time').reset_index(drop=True)
             return df.tail(candles)
     except Exception as e:
@@ -100,7 +104,7 @@ def calculate_stoch_rsi(df, period=14, stoch_period=14, smooth_k=3, smooth_d=3):
     return stoch_rsi_k, stoch_rsi_d
 
 def analyze_signal(ha_df, ema20, ema50, stoch_rsi):
-    """Analisa sinais de compra/venda"""
+    """Analisa sinais de compra/venda com TODAS as condições"""
     if len(ha_df) < 2:
         return "Sem dados suficientes", "none", False
     
@@ -120,39 +124,35 @@ def analyze_signal(ha_df, ema20, ema50, stoch_rsi):
     if pd.isna(current_rsi):
         return "➖ Sem Sinal", "none", False
     
-    # SINAIS DE COMPRA
+    # SINAIS DE COMPRA - CORRIGIDO
     if current_rsi < 20:
         price_above_ema50 = current_price > current_ema50
         price_above_ema20 = current_price > current_ema20
         confirmed = current_close > prev_high
         
-        if price_above_ema50:
-            if confirmed:
-                return "✅ Compra Forte Confirmada", "buy-strong", True
-            else:
-                return "⏳ Aguardando Confirmação (Compra Forte)", "buy-strong-pending", False
-        elif price_above_ema20:
-            if confirmed:
-                return "✅ Compra Fraca Confirmada", "buy-weak", True
-            else:
-                return "⏳ Aguardando Confirmação (Compra Fraca)", "buy-weak-pending", False
+        if price_above_ema50 and confirmed:
+            return "✅ Compra Forte Confirmada", "buy-strong", True
+        elif price_above_ema50 and not confirmed:
+            return "⏳ Aguardando Confirmação (Compra Forte)", "buy-strong-pending", False
+        elif price_above_ema20 and not price_above_ema50 and confirmed:
+            return "✅ Compra Fraca Confirmada", "buy-weak", True
+        elif price_above_ema20 and not price_above_ema50 and not confirmed:
+            return "⏳ Aguardando Confirmação (Compra Fraca)", "buy-weak-pending", False
     
-    # SINAIS DE VENDA
+    # SINAIS DE VENDA - CORRIGIDO
     if current_rsi > 80:
         price_below_ema50 = current_price < current_ema50
         price_below_ema20 = current_price < current_ema20
         confirmed = current_close < prev_low
         
-        if price_below_ema50:
-            if confirmed:
-                return "❌ Venda Forte Confirmada", "sell-strong", True
-            else:
-                return "⏳ Aguardando Confirmação (Venda Forte)", "sell-strong-pending", False
-        elif price_below_ema20:
-            if confirmed:
-                return "❌ Venda Fraca Confirmada", "sell-weak", True
-            else:
-                return "⏳ Aguardando Confirmação (Venda Fraca)", "sell-weak-pending", False
+        if price_below_ema50 and confirmed:
+            return "❌ Venda Forte Confirmada", "sell-strong", True
+        elif price_below_ema50 and not confirmed:
+            return "⏳ Aguardando Confirmação (Venda Forte)", "sell-strong-pending", False
+        elif price_below_ema20 and not price_below_ema50 and confirmed:
+            return "❌ Venda Fraca Confirmada", "sell-weak", True
+        elif price_below_ema20 and not price_below_ema50 and not confirmed:
+            return "⏳ Aguardando Confirmação (Venda Fraca)", "sell-weak-pending", False
     
     return "➖ Sem Sinal", "none", False
 
@@ -193,15 +193,12 @@ def process_token(symbol):
     }
 
 def plot_chart(token_data):
-    """Cria gráfico Plotly com Heikin Ashi"""
+    """Cria gráfico Plotly com Heikin Ashi - SINAIS CORRIGIDOS"""
     df = token_data['data']
     
     fig = go.Figure()
     
     # Velas Heikin Ashi
-    colors = ['green' if row['ha_close'] >= row['ha_open'] else 'red' 
-              for idx, row in df.iterrows()]
-    
     fig.add_trace(go.Candlestick(
         x=df['time'],
         open=df['ha_open'],
@@ -228,38 +225,89 @@ def plot_chart(token_data):
         line=dict(color='orange', width=2)
     ))
     
-    # Marcar sinais confirmados
-    buy_signals = df[
-        (df['stoch_rsi'] < 20) & 
-        (df['ha_close'] > df['ha_high'].shift(1))
-    ]
+    # Marcar APENAS sinais CONFIRMADOS com TODAS as condições
+    buy_signals_strong = []
+    buy_signals_weak = []
+    sell_signals_strong = []
+    sell_signals_weak = []
     
-    sell_signals = df[
-        (df['stoch_rsi'] > 80) & 
-        (df['ha_close'] < df['ha_low'].shift(1))
-    ]
+    for i in range(1, len(df)):
+        current_rsi = df.iloc[i]['stoch_rsi']
+        current_close = df.iloc[i]['ha_close']
+        prev_high = df.iloc[i-1]['ha_high']
+        prev_low = df.iloc[i-1]['ha_low']
+        current_ema20 = df.iloc[i]['ema20']
+        current_ema50 = df.iloc[i]['ema50']
+        
+        if pd.isna(current_rsi):
+            continue
+        
+        # COMPRA FORTE: RSI<20 + Close>Prev_High + Preço>EMA50
+        if (current_rsi < 20 and 
+            current_close > prev_high and 
+            current_close > current_ema50):
+            buy_signals_strong.append(i)
+        
+        # COMPRA FRACA: RSI<20 + Close>Prev_High + Preço>EMA20 (mas <EMA50)
+        elif (current_rsi < 20 and 
+              current_close > prev_high and 
+              current_close > current_ema20 and 
+              current_close < current_ema50):
+            buy_signals_weak.append(i)
+        
+        # VENDA FORTE: RSI>80 + Close<Prev_Low + Preço<EMA50
+        if (current_rsi > 80 and 
+            current_close < prev_low and 
+            current_close < current_ema50):
+            sell_signals_strong.append(i)
+        
+        # VENDA FRACA: RSI>80 + Close<Prev_Low + Preço<EMA20 (mas >EMA50)
+        elif (current_rsi > 80 and 
+              current_close < prev_low and 
+              current_close < current_ema20 and 
+              current_close > current_ema50):
+            sell_signals_weak.append(i)
     
-    if not buy_signals.empty:
+    # Plotar os sinais
+    if buy_signals_strong:
         fig.add_trace(go.Scatter(
-            x=buy_signals['time'],
-            y=buy_signals['ha_low'],
+            x=df.iloc[buy_signals_strong]['time'],
+            y=df.iloc[buy_signals_strong]['ha_low'] * 0.998,
             mode='markers',
-            name='Sinal Compra',
-            marker=dict(color='lime', size=12, symbol='triangle-up')
+            name='Compra Forte',
+            marker=dict(color='lime', size=15, symbol='triangle-up')
         ))
     
-    if not sell_signals.empty:
+    if buy_signals_weak:
         fig.add_trace(go.Scatter(
-            x=sell_signals['time'],
-            y=sell_signals['ha_high'],
+            x=df.iloc[buy_signals_weak]['time'],
+            y=df.iloc[buy_signals_weak]['ha_low'] * 0.999,
             mode='markers',
-            name='Sinal Venda',
-            marker=dict(color='red', size=12, symbol='triangle-down')
+            name='Compra Fraca',
+            marker=dict(color='lightgreen', size=12, symbol='triangle-up')
+        ))
+    
+    if sell_signals_strong:
+        fig.add_trace(go.Scatter(
+            x=df.iloc[sell_signals_strong]['time'],
+            y=df.iloc[sell_signals_strong]['ha_high'] * 1.002,
+            mode='markers',
+            name='Venda Forte',
+            marker=dict(color='red', size=15, symbol='triangle-down')
+        ))
+    
+    if sell_signals_weak:
+        fig.add_trace(go.Scatter(
+            x=df.iloc[sell_signals_weak]['time'],
+            y=df.iloc[sell_signals_weak]['ha_high'] * 1.001,
+            mode='markers',
+            name='Venda Fraca',
+            marker=dict(color='orange', size=12, symbol='triangle-down')
         ))
     
     fig.update_layout(
-        title=f"{token_data['token']} - Heikin Ashi (3min)",
-        xaxis_title="Data/Hora",
+        title=f"{token_data['token']} - Heikin Ashi (3min) - Horário de Brasília",
+        xaxis_title="Data/Hora (BRT)",
         yaxis_title="Preço (USDT)",
         height=500,
         xaxis_rangeslider_visible=False,
@@ -287,7 +335,7 @@ def plot_rsi(token_data):
     
     fig.update_layout(
         title="RSI Estocástico",
-        xaxis_title="Data/Hora",
+        xaxis_title="Data/Hora (BRT)",
         yaxis_title="RSI (%)",
         height=300,
         template='plotly_dark',
@@ -299,7 +347,7 @@ def plot_rsi(token_data):
 # Interface Streamlit
 def main():
     st.title("📈 Analisador de Criptomoedas - KuCoin")
-    st.markdown("**Estratégia:** Heikin Ashi + RSI Estocástico + EMAs (3min)")
+    st.markdown("**Estratégia:** Heikin Ashi + RSI Estocástico + EMAs (3min) - **Horário de Brasília**")
     
     # Sidebar
     st.sidebar.header("⚙️ Configurações")
@@ -340,10 +388,10 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📊 Legenda de Sinais")
     st.sidebar.markdown("""
-    - 🟢 **Compra Forte**: RSI<20 + Preço>EMA50
-    - 🟡 **Compra Fraca**: RSI<20 + Preço>EMA20
-    - 🔴 **Venda Forte**: RSI>80 + Preço<EMA50
-    - 🟠 **Venda Fraca**: RSI>80 + Preço<EMA20
+    - 🟢 **Compra Forte**: RSI<20 + Preço>EMA50 + Confirmado
+    - 🟡 **Compra Fraca**: RSI<20 + Preço>EMA20 + Confirmado
+    - 🔴 **Venda Forte**: RSI>80 + Preço<EMA50 + Confirmado
+    - 🟠 **Venda Fraca**: RSI>80 + Preço<EMA20 + Confirmado
     - ⏳ **Aguardando**: Precisa confirmar próxima vela
     """)
     
@@ -390,6 +438,27 @@ def main():
         
         if selected_token:
             token_data = next(item for item in st.session_state['analysis_data'] if item['token'] == selected_token)
+            
+            # BOTÃO DE ATUALIZAÇÃO INDIVIDUAL
+            col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 6])
+            with col_btn1:
+                if st.button("🔄 Atualizar Este Token", key="refresh_single"):
+                    with st.spinner(f"Atualizando {selected_token}..."):
+                        symbol = selected_token.replace('/', '-')
+                        updated_data = process_token(symbol)
+                        
+                        if updated_data:
+                            # Substituir na lista
+                            for idx, item in enumerate(st.session_state['analysis_data']):
+                                if item['token'] == selected_token:
+                                    st.session_state['analysis_data'][idx] = updated_data
+                                    break
+                            
+                            token_data = updated_data
+                            st.success("✅ Token atualizado!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Erro ao atualizar token")
             
             # Métricas
             col1, col2, col3, col4 = st.columns(4)
