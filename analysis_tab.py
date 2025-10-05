@@ -80,22 +80,35 @@ def show_analysis_page():
     col5.metric("Total closedPnl (arquivo inteiro)", f"{total_closedpnl_arquivo:.4f}")
     col6.metric("Total closedPnl (apenas Close)", f"{total_closedpnl_fechados:.4f}")
 
-    # PnL acumulado
-    df_close["PnL_Acumulado"] = df_close["closedPnl"].cumsum()
+    # PnL acumulado (líquido e bruto)
+    df_close["PnL_Acumulado_Liquido"] = df_close["closedPnl"].cumsum()
+    df_close["PnL_Acumulado_Bruto"] = df_close["pnl_bruto"].cumsum()
+
     fig_pnl = go.Figure()
+    # Linha principal: Líquido
     fig_pnl.add_trace(go.Scatter(
         x=df_close["time"],
-        y=df_close["PnL_Acumulado"],
+        y=df_close["PnL_Acumulado_Liquido"],
         mode="lines+markers",
-        name="PnL Líquido Acumulado",
+        name="PnL Líquido (Acumulado)",
         line=dict(color="cyan", width=3)
     ))
+    # Linha secundária: Bruto
+    fig_pnl.add_trace(go.Scatter(
+        x=df_close["time"],
+        y=df_close["PnL_Acumulado_Bruto"],
+        mode="lines",
+        name="PnL Bruto (Acumulado)",
+        line=dict(color="lightgray", width=2, dash="dash")
+    ))
+
     fig_pnl.update_layout(
-        title="💰 Evolução do PnL Acumulado (Líquido)",
+        title="💰 Evolução do PnL Acumulado",
         xaxis_title="Data/Hora",
         yaxis_title="PnL (USDT)",
         template="plotly_dark",
-        height=400
+        height=400,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     st.plotly_chart(fig_pnl, use_container_width=True)
 
