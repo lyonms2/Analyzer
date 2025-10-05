@@ -46,12 +46,15 @@ def show_analysis_page():
             last_open = same_coin.iloc[-1]
             df_close.at[idx, "open_fee"] = last_open["fee"]
 
-    # Calcular taxas totais e PnL bruto
+    # Calcular taxas totais e PnL
     df_close["total_fee"] = df_close["fee"] + df_close["open_fee"]
-    df_close["pnl_bruto"] = df_close["closedPnl"] + df_close["total_fee"]
+    # PnL bruto: resultado do trade sem considerar taxas
+    df_close["pnl_bruto"] = df_close["closedPnl"]
+    # PnL líquido: resultado do trade após descontar taxas de abertura e fechamento
+    df_close["pnl_liquido"] = df_close["closedPnl"] - df_close["total_fee"]
 
-    # Classificar resultado
-    df_close["resultado"] = df_close["pnl_bruto"].apply(lambda x: "Acerto" if x > 0 else ("Erro" if x < 0 else "Neutro"))
+    # Classificar resultado (com base no PnL líquido)
+    df_close["resultado"] = df_close["pnl_liquido"].apply(lambda x: "Acerto" if x > 0 else ("Erro" if x < 0 else "Neutro"))
 
     # Estatísticas
     total_trades = len(df_close)
@@ -60,10 +63,10 @@ def show_analysis_page():
     taxa_acerto = (acertos / (acertos + erros) * 100) if (acertos + erros) > 0 else 0
 
     pnl_bruto_total = df_close["pnl_bruto"].sum()
-    pnl_liquido_total = df_close["closedPnl"].sum()
+    pnl_liquido_total = df_close["pnl_liquido"].sum()
 
-    lucro_medio = df_close.loc[df_close["pnl_bruto"] > 0, "pnl_bruto"].mean()
-    perda_media = df_close.loc[df_close["pnl_bruto"] < 0, "pnl_bruto"].mean()
+    lucro_medio = df_close.loc[df_close["pnl_liquido"] > 0, "pnl_liquido"].mean()
+    perda_media = df_close.loc[df_close["pnl_liquido"] < 0, "pnl_liquido"].mean()
 
     # Métricas principais
     st.markdown("### 💹 Resultados Gerais")
@@ -76,7 +79,7 @@ def show_analysis_page():
     col6.metric("PnL Líquido (com taxas)", f"{pnl_liquido_total:.4f}")
 
     # PnL acumulado (líquido)
-    df_close["PnL_Acumulado"] = df_close["closedPnl"].cumsum()
+    df_close["PnL_Acumulado"] = df_close["pnl_liquido"].cumsum()
     fig_pnl = go.Figure()
     fig_pnl.add_trace(go.Scatter(
         x=df_close["time"],
@@ -101,12 +104,12 @@ def show_analysis_page():
     coin_stats = (
         df_close.groupby("coin")
         .agg(
-            total_trades=("pnl_bruto", "count"),
-            acertos=("pnl_bruto", lambda x: (x > 0).sum()),
-            erros=("pnl_bruto", lambda x: (x < 0).sum()),
-            taxa_acerto=("pnl_bruto", lambda x: (x > 0).sum() / len(x) * 100),
+            total_trades=("pnl_liquido", "count"),
+            acertos=("pnl_liquido", lambda x: (x > 0).sum()),
+            erros=("pnl_liquido", lambda x: (x < 0).sum()),
+            taxa_acerto=("pnl_liquido", lambda x: (x > 0).sum() / len(x) * 100),
             pnl_bruto=("pnl_bruto", "sum"),
-            pnl_liquido=("closedPnl", "sum")
+            pnl_liquido=("pnl_liquido", "sum")
         )
         .sort_values("taxa_acerto", ascending=False)
         .reset_index()
@@ -133,12 +136,12 @@ def show_analysis_page():
     hora_stats = (
         df_close.groupby("hora")
         .agg(
-            total_trades=("pnl_bruto", "count"),
-            acertos=("pnl_bruto", lambda x: (x > 0).sum()),
-            erros=("pnl_bruto", lambda x: (x < 0).sum()),
-            taxa_acerto=("pnl_bruto", lambda x: (x > 0).sum() / len(x) * 100),
+            total_trades=("pnl_liquido", "count"),
+            acertos=("pnl_liquido", lambda x: (x > 0).sum()),
+            erros=("pnl_liquido", lambda x: (x < 0).sum()),
+            taxa_acerto=("pnl_liquido", lambda x: (x > 0).sum() / len(x) * 100),
             pnl_bruto=("pnl_bruto", "sum"),
-            pnl_liquido=("closedPnl", "sum")
+            pnl_liquido=("pnl_liquido", "sum")
         )
         .reset_index()
     )
