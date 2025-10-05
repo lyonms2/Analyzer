@@ -22,11 +22,12 @@ def fetch_kucoin_data(symbol, candles=200):
     try:
         symbol = symbol.replace('/', '-')  # correção do formato
         end_time = int(time.time())
-        start_time = end_time - (candles * 180)
+        # 15min candles => 900 segundos por candle
+        start_time = end_time - (candles * 900)
 
         url = "https://api.kucoin.com/api/v1/market/candles"
         params = {
-            'type': '3min',
+            'type': '15min',
             'symbol': symbol,
             'startAt': start_time,
             'endAt': end_time
@@ -66,65 +67,61 @@ def calculate_heikin_ashi(df):
 def calculate_ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
-def calculate_stoch_rsi(df, period=14, stoch_period=14, smooth_k=3, smooth_d=3):
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
+def is_price_near_ema(price: float, ema_value: float, tolerance_percent: float = 0.5) -> bool:
+    if pd.isna(ema_value) or pd.isna(price):
+        return False
+    diff_percent = abs(price - ema_value) / ema_value * 100
+    return diff_percent <= tolerance_percent
 
-    rsi_min = rsi.rolling(window=stoch_period).min()
-    rsi_max = rsi.rolling(window=stoch_period).max()
-    stoch_rsi = 100 * (rsi - rsi_min) / (rsi_max - rsi_min)
-    stoch_rsi_k = stoch_rsi.rolling(window=smooth_k).mean()
-    stoch_rsi_d = stoch_rsi_k.rolling(window=smooth_d).mean()
-
-    return stoch_rsi_k, stoch_rsi_d
-
-def analyze_signal(ha_df, ema20, ema50, stoch_rsi):
+def analyze_signal(ha_df, ema20, ema50):
     if len(ha_df) < 2:
-        return "Sem dados suficientes", "none", False
+        return "Sem dados suficientes", "none", False, "-", "-", "-"
 
     current_idx = len(ha_df) - 1
     prev_idx = current_idx - 1
     current_price = ha_df.loc[current_idx, 'ha_close']
-    current_rsi = stoch_rsi.iloc[current_idx]
     prev_high = ha_df.loc[prev_idx, 'ha_high']
     prev_low = ha_df.loc[prev_idx, 'ha_low']
     current_close = ha_df.loc[current_idx, 'ha_close']
     current_ema20 = ema20.iloc[current_idx]
     current_ema50 = ema50.iloc[current_idx]
+    prev_ema20 = ema20.iloc[prev_idx]
+    prev_ema50 = ema50.iloc[prev_idx]
+    prev_price = ha_df.loc[prev_idx, 'ha_close']
 
-    if pd.isna(current_rsi):
-        return "➖ Sem Sinal", "none", False
+    cross_label = "-"
+    if not pd.isna(prev_ema20) and not pd.isna(prev_ema50) and not pd.isna(current_ema20) and not pd.isna(current_ema50):
+        crossed_up = prev_ema20 <= prev_ema50 and current_ema20 > current_ema50
+        crossed_down = prev_ema20 >= prev_ema50 and current_ema20 < current_ema50
+        if crossed_up:
+            cross_label = "Cruzou para cima (EMA20 > EMA50)"
+        elif crossed_down:
+            cross_label = "Cruzou para baixo (EMA20 < EMA50)"
 
-    if current_rsi < 20:
-        price_above_ema50 = current_price > current_ema50
-        price_above_ema20 = current_price > current_ema20
-        confirmed = current_close > prev_high
-        if price_above_ema50 and confirmed:
-            return "✅ Compra Forte Confirmada", "buy-strong", True
-        elif price_above_ema50:
-            return "⏳ Aguardando Confirmação (Compra Forte)", "buy-strong-pending", False
-        elif price_above_ema20 and confirmed:
-            return "✅ Compra Fraca Confirmada", "buy-weak", True
-        elif price_above_ema20:
-            return "⏳ Aguardando Confirmação (Compra Fraca)", "buy-weak-pending", False
+    # Cruzamento do preço com as EMAs
+    price_cross_ema20 = "-"
+    price_cross_ema50 = "-"
+    if not pd.isna(prev_price) and not pd.isna(current_price) and not pd.isna(prev_ema20) and not pd.isna(current_ema20):
+        if prev_price <= prev_ema20 and current_price > current_ema20:
+            price_cross_ema20 = "Preço cruzou acima da EMA20"
+        elif prev_price >= prev_ema20 and current_price < current_ema20:
+            price_cross_ema20 = "Preço cruzou abaixo da EMA20"
+    if not pd.isna(prev_price) and not pd.isna(current_price) and not pd.isna(prev_ema50) and not pd.isna(current_ema50):
+        if prev_price <= prev_ema50 and current_price > current_ema50:
+            price_cross_ema50 = "Preço cruzou acima da EMA50"
+        elif prev_price >= prev_ema50 and current_price < current_ema50:
+            price_cross_ema50 = "Preço cruzou abaixo da EMA50"
 
-    if current_rsi > 80:
-        price_below_ema50 = current_price < current_ema50
-        price_below_ema20 = current_price < current_ema20
-        confirmed = current_close < prev_low
-        if price_below_ema50 and confirmed:
-            return "❌ Venda Forte Confirmada", "sell-strong", True
-        elif price_below_ema50:
-            return "⏳ Aguardando Confirmação (Venda Forte)", "sell-strong-pending", False
-        elif price_below_ema20 and confirmed:
-            return "❌ Venda Fraca Confirmada", "sell-weak", True
-        elif price_below_ema20:
-            return "⏳ Aguardando Confirmação (Venda Fraca)", "sell-weak-pending", False
+    near_ema20 = is_price_near_ema(current_price, current_ema20)
+    near_ema50 = is_price_near_ema(current_price, current_ema50)
 
-    return "➖ Sem Sinal", "none", False
+    if near_ema20 and near_ema50:
+        return "📍 Próximo de EMA20 e EMA50", "near-both", True, cross_label, price_cross_ema20, price_cross_ema50
+    if near_ema50:
+        return "📍 Próximo de EMA50", "near-ema50", True, cross_label, price_cross_ema20, price_cross_ema50
+    if near_ema20:
+        return "📍 Próximo de EMA20", "near-ema20", True, cross_label, price_cross_ema20, price_cross_ema50
+    return "➖ Longe das EMAs", "none", False, cross_label, price_cross_ema20, price_cross_ema50
 
 def process_token(symbol):
     df = fetch_kucoin_data(symbol)
@@ -134,21 +131,21 @@ def process_token(symbol):
     ha_df = calculate_heikin_ashi(df)
     ha_df['ema20'] = calculate_ema(ha_df['ha_close'], 20)
     ha_df['ema50'] = calculate_ema(ha_df['ha_close'], 50)
-    ha_df['stoch_rsi'], ha_df['stoch_rsi_d'] = calculate_stoch_rsi(ha_df)
-
-    status, signal_type, confirmed = analyze_signal(
-        ha_df, ha_df['ema20'], ha_df['ema50'], ha_df['stoch_rsi']
+    status, signal_type, confirmed, cross_label, price_cross_ema20, price_cross_ema50 = analyze_signal(
+        ha_df, ha_df['ema20'], ha_df['ema50']
     )
     last_row = ha_df.iloc[-1]
     return {
         'token': symbol.replace('-', '/'),
         'price': f"{last_row['ha_close']:.8f}",
-        'rsi': f"{last_row['stoch_rsi']:.2f}" if not pd.isna(last_row['stoch_rsi']) else "N/A",
         'ema20': f"{last_row['ema20']:.8f}",
         'ema50': f"{last_row['ema50']:.8f}",
         'status': status,
         'signal_type': signal_type,
         'confirmed': confirmed,
+        'cross': cross_label,
+        'price_cross_ema20': price_cross_ema20,
+        'price_cross_ema50': price_cross_ema50,
         'data': ha_df
     }
 
@@ -158,7 +155,7 @@ def process_token(symbol):
 
 def show_kucoin_page():
     st.title("📈 Analisador de Criptomoedas - KuCoin")
-    st.markdown("**Estratégia:** Heikin Ashi + RSI Estocástico + EMAs (3min) - **Horário de Brasília**")
+    st.markdown("**Estratégia:** Heikin Ashi + EMAs (15min) - **Horário de Brasília**")
 
     st.sidebar.header("⚙️ Configurações")
 
@@ -187,9 +184,11 @@ def show_kucoin_page():
         df_table = pd.DataFrame([{
             'Token': item['token'],
             'Preço': item['price'],
-            'RSI': item['rsi'],
             'EMA 20': item['ema20'],
             'EMA 50': item['ema50'],
+            'Preço x EMA20': item.get('price_cross_ema20', '-'),
+            'Preço x EMA50': item.get('price_cross_ema50', '-'),
+            'Cruzamento': item.get('cross', '-'),
             'Status': item['status']
         } for item in st.session_state['analysis_data']])
 
