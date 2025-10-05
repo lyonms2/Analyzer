@@ -32,8 +32,9 @@ def show_analysis_page():
         st.error("❌ Nenhum trade fechado encontrado (Close Long / Close Short).")
         st.stop()
 
-    # Vincular taxa do Open mais próximo anterior ao Close da mesma coin e direção
+    # Vincular taxa e PnL do Open mais próximo anterior ao Close da mesma coin e direção
     df_close["open_fee"] = 0.0
+    df_close["open_pnl"] = 0.0
     for idx, row in df_close.iterrows():
         same_coin = df_open[df_open["coin"] == row["coin"]]
         if "Long" in row["dir"]:
@@ -45,13 +46,16 @@ def show_analysis_page():
         if not same_coin.empty:
             last_open = same_coin.iloc[-1]
             df_close.at[idx, "open_fee"] = last_open["fee"]
+            # incluir PnL do evento de abertura (se existir no CSV)
+            if "closedPnl" in last_open:
+                df_close.at[idx, "open_pnl"] = last_open["closedPnl"]
 
-    # Calcular taxas totais e PnL
+    # Calcular taxas totais e PnL (incluindo PnL do Open associado)
     df_close["total_fee"] = df_close["fee"] + df_close["open_fee"]
-    # PnL bruto: resultado do trade sem considerar taxas
-    df_close["pnl_bruto"] = df_close["closedPnl"]
-    # PnL líquido: resultado do trade após descontar taxas de abertura e fechamento
-    df_close["pnl_liquido"] = df_close["closedPnl"] - df_close["total_fee"]
+    # PnL bruto: soma do PnL do Open + Close (sem taxas)
+    df_close["pnl_bruto"] = df_close["closedPnl"].fillna(0) + df_close["open_pnl"].fillna(0)
+    # PnL líquido: bruto menos taxas de abertura e fechamento
+    df_close["pnl_liquido"] = df_close["pnl_bruto"] - df_close["total_fee"]
 
     # Classificar resultado (com base no PnL líquido)
     df_close["resultado"] = df_close["pnl_liquido"].apply(lambda x: "Acerto" if x > 0 else ("Erro" if x < 0 else "Neutro"))
