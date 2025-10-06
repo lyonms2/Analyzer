@@ -21,12 +21,12 @@ def fetch_kucoin_data(symbol, candles=200):
     try:
         symbol = symbol.replace('/', '-')  # correção do formato
         end_time = int(time.time())
-        # 3min candles => 180 segundos por candle
-        start_time = end_time - (candles * 180)
+        # 4h candles => 14400 segundos por candle
+        start_time = end_time - (candles * 14400)
 
         url = "https://api.kucoin.com/api/v1/market/candles"
         params = {
-            'type': '3min',
+            'type': '4hour',
             'symbol': symbol,
             'startAt': start_time,
             'endAt': end_time
@@ -48,20 +48,7 @@ def fetch_kucoin_data(symbol, candles=200):
         st.error(f"Erro ao buscar {symbol}: {str(e)}")
     return None
 
-def calculate_heikin_ashi(df):
-    ha_df = df.copy()
-    ha_df['ha_close'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
-    ha_df['ha_open'] = 0.0
-
-    for i in range(len(df)):
-        if i == 0:
-            ha_df.loc[i, 'ha_open'] = (df.loc[i, 'open'] + df.loc[i, 'close']) / 2
-        else:
-            ha_df.loc[i, 'ha_open'] = (ha_df.loc[i-1, 'ha_open'] + ha_df.loc[i-1, 'ha_close']) / 2
-
-    ha_df['ha_high'] = ha_df[['high', 'ha_open', 'ha_close']].max(axis=1)
-    ha_df['ha_low'] = ha_df[['low', 'ha_open', 'ha_close']].min(axis=1)
-    return ha_df
+# Função removida - agora usamos velas comuns (OHLC) diretamente
 
 def calculate_ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
@@ -83,21 +70,21 @@ def send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool:
     except Exception:
         return False
 
-def analyze_signal(ha_df, ema20, ema50):
-    if len(ha_df) < 2:
+def analyze_signal(df, ema20, ema50):
+    if len(df) < 2:
         return "Sem dados suficientes", "none", False, "-", "-", "-"
 
-    current_idx = len(ha_df) - 1
+    current_idx = len(df) - 1
     prev_idx = current_idx - 1
-    current_price = ha_df.loc[current_idx, 'ha_close']
-    prev_high = ha_df.loc[prev_idx, 'ha_high']
-    prev_low = ha_df.loc[prev_idx, 'ha_low']
-    current_close = ha_df.loc[current_idx, 'ha_close']
+    current_price = df.loc[current_idx, 'close']
+    prev_high = df.loc[prev_idx, 'high']
+    prev_low = df.loc[prev_idx, 'low']
+    current_close = df.loc[current_idx, 'close']
     current_ema20 = ema20.iloc[current_idx]
     current_ema50 = ema50.iloc[current_idx]
     prev_ema20 = ema20.iloc[prev_idx]
     prev_ema50 = ema50.iloc[prev_idx]
-    prev_price = ha_df.loc[prev_idx, 'ha_close']
+    prev_price = df.loc[prev_idx, 'close']
 
     cross_label = "-"
     if not pd.isna(prev_ema20) and not pd.isna(prev_ema50) and not pd.isna(current_ema20) and not pd.isna(current_ema50):
@@ -138,16 +125,16 @@ def process_token(symbol):
     if df is None or len(df) < 50:
         return None
 
-    ha_df = calculate_heikin_ashi(df)
-    ha_df['ema20'] = calculate_ema(ha_df['ha_close'], 20)
-    ha_df['ema50'] = calculate_ema(ha_df['ha_close'], 50)
+    # Usar velas comuns (OHLC) diretamente
+    df['ema20'] = calculate_ema(df['close'], 20)
+    df['ema50'] = calculate_ema(df['close'], 50)
     status, signal_type, confirmed, cross_label, price_cross_ema20, price_cross_ema50 = analyze_signal(
-        ha_df, ha_df['ema20'], ha_df['ema50']
+        df, df['ema20'], df['ema50']
     )
-    last_row = ha_df.iloc[-1]
+    last_row = df.iloc[-1]
     return {
         'token': symbol.replace('-', '/'),
-        'price': f"{last_row['ha_close']:.8f}",
+        'price': f"{last_row['close']:.8f}",
         'ema20': f"{last_row['ema20']:.8f}",
         'ema50': f"{last_row['ema50']:.8f}",
         'status': status,
@@ -157,7 +144,7 @@ def process_token(symbol):
         'price_cross_ema20': price_cross_ema20,
         'price_cross_ema50': price_cross_ema50,
         'last_candle_time': str(last_row['time']),
-        'data': ha_df
+        'data': df
     }
 
 # =========================
@@ -166,11 +153,11 @@ def process_token(symbol):
 
 def show_kucoin_page():
     st.title("📈 Analisador de Criptomoedas - KuCoin")
-    st.markdown("**Estratégia:** Heikin Ashi + EMAs (3min) - **Horário de Brasília**")
+    st.markdown("**Estratégia:** Velas Comuns + EMAs (4h) - **Horário de Brasília**")
 
     st.sidebar.header("⚙️ Configurações")
     st.sidebar.subheader("Alertas e Monitoramento")
-    enable_monitor = st.sidebar.checkbox("Ativar monitoramento automático (3 min)", value=False)
+    enable_monitor = st.sidebar.checkbox("Ativar monitoramento automático (4h)", value=False)
     bot_token = st.sidebar.text_input("Telegram Bot Token", type="password")
     chat_id = st.sidebar.text_input("Telegram Chat ID")
     send_on_near = st.sidebar.checkbox("Alertar quando preço próximo das EMAs", value=True)
@@ -227,12 +214,12 @@ def show_kucoin_page():
     if 'last_update' in st.session_state:
         st.sidebar.info(f"🕒 Última atualização: {st.session_state['last_update']}")
 
-    # Auto refresh via JavaScript a cada 3 minutos quando monitoramento ativo
+    # Auto refresh via JavaScript a cada 4h quando monitoramento ativo
     if enable_monitor:
         st.markdown(
             """
             <script>
-            setTimeout(function(){ window.location.reload(); }, 180000);
+            setTimeout(function(){ window.location.reload(); }, 14400000);
             </script>
             """,
             unsafe_allow_html=True,
